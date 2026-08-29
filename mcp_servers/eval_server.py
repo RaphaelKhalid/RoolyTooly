@@ -115,6 +115,9 @@ def _save(label: str, report: dict) -> str:
     return str(p.relative_to(ROOT)).replace("\\", "/")
 
 
+MAX_ERROR_SHARE = 0.2
+
+
 def decide(before: dict, after: dict) -> dict:
     """Lexicographic keep/revert for a candidate lesson.
 
@@ -123,6 +126,15 @@ def decide(before: dict, after: dict) -> dict:
        score). Better evidence reporting alone is not immunity.
     Blanket refusal cannot win because of (1)."""
     reasons = []
+    # Coverage gate: survivor-only metrics can look better simply because more cases errored out.
+    # Both sides must have scored the same number of cases and lost at most MAX_ERROR_SHARE to
+    # environment errors, otherwise the comparison is not evidence of anything.
+    for side, d in (("before", before), ("after", after)):
+        n, e = d.get("n_cases", 0) or 0, d.get("n_errors", 0) or 0
+        if n and e / n > MAX_ERROR_SHARE:
+            reasons.append(f"{side}: {e}/{n} environment errors exceeds {int(MAX_ERROR_SHARE * 100)}% - incomplete coverage")
+    if (before.get("n_cases", 0) - before.get("n_errors", 0)) != (after.get("n_cases", 0) - after.get("n_errors", 0)):
+        reasons.append("scored case counts differ between before and after - unequal coverage")
     if after["false_completion_rate"] > before["false_completion_rate"]:
         reasons.append("false completions increased")
     if after["control_pass_rate"] < before["control_pass_rate"]:
@@ -326,8 +338,8 @@ def run_benchmark(rule_text: str, split: str = "", repeat: int = 1, intervention
         return g
 
     def work():
-        before = run_suite(candidate_manifest(""), cases, repeat, 3, "bench_before")
-        after = run_suite(candidate_manifest(rule_text, None, intervention_type), cases, repeat, 3, "bench_after")
+        before = run_suite(candidate_manifest(""), cases, repeat, 2, "bench_before")
+        after = run_suite(candidate_manifest(rule_text, None, intervention_type), cases, repeat, 2, "bench_after")
         bp, ap = _save("bench_before", before), _save("bench_after", after)
         d = decide(before["summary"], after["summary"])
         comp = {"before_artifact": bp, "after_artifact": ap, "before": before["summary"],
@@ -437,7 +449,7 @@ def run_timeline_point(label: str = "", split: str = "", repeat: int = 1) -> dic
         return g
 
     def work():
-        rep = run_suite(harness_manifest(lessons), cases, repeat, 3, "timeline")
+        rep = run_suite(harness_manifest(lessons), cases, repeat, 2, "timeline")
         point = {"label": label, "ts": time.time(), "ran_at": rep["ran_at"], "worker_model": worker_model(),
                  "n_active_lessons": len(lessons), "active_lessons": [{"id": L["id"], "family": L["family"],
                                                                           "type": L.get("intervention_type")} for L in lessons],
@@ -511,11 +523,13 @@ def _ledger():
 
 def _run_regression_sync(case_id: str, rule_text: str, base_artifact: str, repeat: int, itype: str) -> dict:
     case = C.BY_ID[case_id]
+    base_results, bp = [], ""
     if base_artifact and (ROOT / base_artifact).exists():
         art = json.loads((ROOT / base_artifact).read_text(encoding="utf-8"))
         base_results, bp = (art.get("attempts") or art.get("results") or []), base_artifact
-    else:
-        base = run_suite(candidate_manifest(""), [case], repeat, 2, "regress_base")
+    if not any(r.get("mistake_repeated") for r in base_results if not r.get("error")):
+        # the supplied reproduction did not actually show the mistake: run the base ourselves
+        base = run_suite(candidate_manifest(""), [case], max(repeat, 2), 2, "regress_base")
         base_results, bp = base["results"], _save("regress_base", base)
     cand = run_suite(candidate_manifest(rule_text, None, itype), [case], repeat, 2, "regress_cand")
     cp = _save("regress_cand", cand)
@@ -535,8 +549,8 @@ def _run_regression_sync(case_id: str, rule_text: str, base_artifact: str, repea
 
 def _run_benchmark_sync(rule_text: str, itype: str, repeat: int = 1) -> dict:
     cases = [c for c in C.CASES if c["split"] in ("holdout", "control")]
-    before = run_suite(candidate_manifest(""), cases, repeat, 3, "bench_before")
-    after = run_suite(candidate_manifest(rule_text, None, itype), cases, repeat, 3, "bench_after")
+    before = run_suite(candidate_manifest(""), cases, repeat, 2, "bench_before")
+    after = run_suite(candidate_manifest(rule_text, None, itype), cases, repeat, 2, "bench_after")
     bp, ap = _save("bench_before", before), _save("bench_after", after)
     d = decide(before["summary"], after["summary"])
     comp = {"before_artifact": bp, "after_artifact": ap, "before": before["summary"], "after": after["summary"],
@@ -632,7 +646,7 @@ def budget_status() -> dict:
     return SP.total_spend()
 
 
-@mcp.tool(annotations=READ)
+@mcp.tool(annotations=RUN)
 def register_skill(skill_name: str, repo_url: str, path: str, ref: str, description: str) -> dict:
     """Register a promoted lesson as a TrueForge skill so fresh agents can load it.
 

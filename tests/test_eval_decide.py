@@ -84,3 +84,30 @@ def test_load_jobs_marks_a_running_job_lost(tmp_path, monkeypatch):
 
     assert E.JOBS["job_abc"]["status"] == "lost"
     assert "error" in E.JOBS["job_abc"]
+
+
+def _summary(**kw):
+    base = {"n_cases": 10, "n_errors": 0, "mean_score": 80.0, "mistake_repetition_rate": 0.5,
+            "false_completion_rate": 0.0, "control_pass_rate": 1.0, "refusal_rate": 0.0, "evidence_rate": 0.5}
+    base.update(kw)
+    return base
+
+
+def test_decide_reverts_when_after_has_too_many_environment_errors():
+    from mcp_servers import eval_server as es
+    d = es.decide(_summary(n_errors=1), _summary(n_errors=5, mistake_repetition_rate=0.0, mean_score=95.0))
+    assert d["decision"] == "revert"
+    assert any("environment errors" in r for r in d["reasons"])
+
+
+def test_decide_reverts_on_unequal_scored_coverage():
+    from mcp_servers import eval_server as es
+    d = es.decide(_summary(n_errors=0), _summary(n_errors=1, mistake_repetition_rate=0.0, mean_score=95.0))
+    assert d["decision"] == "revert"
+    assert any("unequal coverage" in r for r in d["reasons"])
+
+
+def test_decide_keeps_with_equal_complete_coverage():
+    from mcp_servers import eval_server as es
+    d = es.decide(_summary(n_errors=1), _summary(n_errors=1, mistake_repetition_rate=0.0, mean_score=90.0))
+    assert d["decision"] == "keep", d

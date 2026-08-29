@@ -12,3 +12,7 @@ hackathon-kickoff-prompt.md
 results/
 ledger/
 !.env.example
+# evidence/ is the curated, committed subset of results/+ledger/ (see scripts/bundle_evidence.py)
+!evidence/
+!evidence/**
+data/

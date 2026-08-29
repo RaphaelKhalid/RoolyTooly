@@ -254,6 +254,30 @@ def promote_lesson(lesson_id: str, decision_note: str = "") -> dict:
             "skill_name": f"lesson-{L['family'].lower()}-{lesson_id.split('_')[-1]}"}
 
 
+REVOKE = ToolAnnotations(readOnlyHint=False, destructiveHint=True, idempotentHint=False,
+                         title="Revoke an ACTIVE lesson (needs human approval)")
+
+
+@mcp.tool(annotations=REVOKE)
+def revoke_lesson(lesson_id: str, reason: str, superseded_by: str = "") -> dict:
+    """Revoke an ACTIVE lesson so fresh agents stop loading it.
+
+    Use when later evidence invalidates it or a better lesson supersedes it. Irreversible;
+    approval-gated. Only active lessons can be revoked."""
+    with _LOCK:
+        st = _replay()
+        L = st["lessons"].get(lesson_id)
+        if not L:
+            return {"error": "unknown lesson"}
+        if L["status"] != "active":
+            return {"error": f"lesson is {L['status']}; only active lessons can be revoked"}
+        if superseded_by and superseded_by not in st["lessons"]:
+            return {"error": f"unknown superseding lesson {superseded_by}"}
+        _append("status", {"lesson_id": lesson_id, "status": "revoked", "note": reason[:500],
+                           "superseded_by": superseded_by or None})
+    return {"lesson_id": lesson_id, "status": "revoked", "superseded_by": superseded_by or None}
+
+
 @mcp.tool(annotations=APPEND)
 def revert_lesson(lesson_id: str, reason: str) -> dict:
     """Mark a CANDIDATE lesson as reverted (benchmark regressed or falsifier won).
@@ -345,7 +369,7 @@ def ledger_summary() -> dict:
     st = _replay()
     return {"corrections": len(st["corrections"]),
             "lessons": {s: sum(1 for L in st["lessons"].values() if L["status"] == s)
-                        for s in ("candidate", "active", "reverted")},
+                        for s in ("candidate", "active", "reverted", "revoked")},
             "quarantined_lines": st["quarantined_lines"],
             "recent": [{"id": L["id"], "family": L["family"], "status": L["status"]}
                        for L in list(st["lessons"].values())[-5:]]}

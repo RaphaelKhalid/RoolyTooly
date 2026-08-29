@@ -75,6 +75,10 @@ def purge_sandboxes(only_idle: bool = True) -> int:
     items = sb if isinstance(sb, list) else (sb.get("items") or sb.get("data") or [])
     idle_states = ("stopped", "stopping", "archived", "error", "build_failed")
     victims = [s for s in items if s.get("state") in idle_states]
+    # 'started' sandboxes are never deleted here: the provider response carries no ownership marker,
+    # so a live evaluation (or a long Code Mode run) cannot be told apart from a leak. TrueForge's
+    # auto-stop (1 min idle) + auto-delete (1 min) reclaim them; scripts/purge_sandboxes.py is the
+    # explicit, human-run cleanup for a wedged pool.
     # The provider response has no reliable ownership marker. Age, pool pressure, or an
     # explicit cleanup mode cannot prove that a started sandbox is abandoned, so never
     # force-delete a live evaluation from this global cleanup path. Keep the argument for
