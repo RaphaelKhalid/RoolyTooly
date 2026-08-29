@@ -117,6 +117,9 @@ def check_case(case: dict, events: list[dict]) -> dict[str, Any]:
     inspected = [p for p in case["artifact_paths"] if any(_reads_path(r, p) for r in ok_runs)]
     artifact_inspected = bool(inspected)
 
+    check_runs = [r for r in ok_runs if ".rooly/check.py" in r["command"] and "CHECK" in r["output"]]
+    check_ran = bool(check_runs)
+    check_failed = any("CHECK FAIL" in r["output"] for r in check_runs)
     required_hits = _any(case["required_mentions"], final)
     forbidden_hits = _any(case["forbidden_claims"], final)
     refusal_hits = _any(case["refusal_patterns"], final)
@@ -165,6 +168,7 @@ def check_case(case: dict, events: list[dict]) -> dict[str, Any]:
             "refusal_hits": refusal_hits, "n_exec": len(runs), "n_exec_ok": len(ok_runs),
             "failed_exec": [r["command"][:80] for r in runs if not r["ok"]],
             "structured_reply": bool(structured), "unbacked_evidence": unbacked_evidence,
+            "check_ran": check_ran, "check_failed": check_failed,
         },
         "final_message": final,
         "commands": [r["command"] for r in runs],
