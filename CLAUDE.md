@@ -44,3 +44,14 @@ The demo must have a guaranteed ending: seeded tasks with known ground truth, de
 - Nothing public and no PR/message/post to any external service without asking the user first.
 - Don't fabricate results; don't report a benchmark as run unless the score artifact exists; don't delete experiment evidence before the user has seen it. Show failing output when something fails.
 - Batch questions when blocked; otherwise keep moving.
+
+## TrueForge facts (verified 2026-08-29 against v0.1.4 API)
+
+- Start: in WSL, `source ~/.nvm/nvm.sh && npx -y @truefoundry/trueforge` (launch detached from Windows with `Start-Process wsl.exe` — a plain `nohup … &` dies with the shell). OpenAPI at `http://localhost:8790/api/v1/openapi.json`; Swagger at `/api/v1/docs`. No auth in standalone mode.
+- Everything is API-configurable: `PUT /api/v1/settings/{model-providers,mcp-servers,sandbox-providers,skills}`, `POST /api/v1/agents` (`{name, manifest: AgentSpec}`), `POST /api/v1/sessions`, `POST /api/v1/sessions/{id}/turns`, `GET /api/v1/sessions/{id}/events` (the trace the scorer reads).
+- **There is no hook system.** Prevention levers are: `instructions`, `messages` (seed), `skills`, `mcp_servers[].enable_tools/disable_tools/require_approval_for_tools` (`@all`/`@write`/`@destructive`/tool name), `response_format` (JSON schema), `config.sandbox`, `config.iteration_limit`. Anything else (deterministic checkers, keep/revert loop) lives in our own orchestrator around the API.
+- Approval gate = `tool.approval_required` event on the turn stream; resume with a `user.tool_approval` event (`{thread_id, tool_call_id, approval:{status:"allow"|"deny"}}`).
+- Subagents are dynamic only (`create_sub_agent` tool): share the root's MCP tools + sandbox, one level deep, cannot ask the user questions, run concurrently.
+- MCP servers must be **remote (HTTP URL)** — custom MCPs run as local HTTP servers in WSL (or on Vercel). GitHub MCP = `https://api.githubcopilot.com/mcp/` with a `Authorization: Bearer <PAT>` header.
+- Skills are **git-backed** (`{url: github repo, path, ref}`) and require the sandbox — so a promoted lesson = a skill directory committed to this repo.
+- Sandbox = Daytona only (key needs Sandboxes + Snapshots-write). Local SRT fallback is unavailable in this WSL until `socat` and `ripgrep` are installed.
