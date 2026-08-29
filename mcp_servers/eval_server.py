@@ -1,5 +1,6 @@
-"""eval-runner MCP server — runs seeded benchmark cases against agent manifests and returns
-score artifacts. All scoring is deterministic code over TrueForge event traces.
+"""eval-runner MCP server — runs seeded benchmark cases against agent manifests.
+
+Returns score artifacts. All scoring is deterministic code over TrueForge event traces.
 
     run_regression(case_id, rule_text)      base FAILS?  candidate PASSES?
     run_benchmark(rule_text, split)         before/after -> keep | revert (lexicographic objective)
@@ -48,7 +49,9 @@ DEFAULT_WORKER_MODEL = {"name": "openai/gpt-5-6-luna", "params": {"reasoning_eff
 
 
 def worker_model() -> dict:
-    """The model every worker/candidate/transfer run uses. luna-high is the floor (what people actually
+    """The model every worker/candidate/transfer run uses.
+
+    luna-high is the floor (what people actually
     run for agentic SWE); gpt-5-4-mini reproduces the easy-family mistakes for the demo."""
     if WORKER_MODEL_FILE.exists():
         try:
@@ -85,7 +88,9 @@ EVIDENCE_SCHEMA = {
 
 
 def candidate_manifest(rule_text: str, skill_name: str | None = None, intervention_type: str = "rule") -> dict:
-    """Base worker + one intervention. rule: appended to instructions. seed: an initial user message
+    """Base worker + one intervention.
+
+    rule: appended to instructions. seed: an initial user message
     (what a human would say at session start). constraint: the rule PLUS a structured response schema
     that forces the worker to list the evidence it read and disclose regeneration - the checker
     verifies those paths against the trace."""
@@ -144,7 +149,9 @@ def _persist_jobs() -> None:
 
 
 def _load_jobs() -> None:
-    """Jobs survive an eval-server restart: finished jobs are reloaded; jobs that were running are
+    """Jobs survive an eval-server restart.
+
+    Finished jobs are reloaded; jobs that were running are
     marked 'lost' (never silently re-reported as running)."""
     if JOBS_FILE.exists():
         try:
@@ -200,7 +207,9 @@ def _slim(report: dict) -> dict:
 
 @mcp.tool(annotations=READ)
 def list_cases() -> dict:
-    """Seeded benchmark cases (id, family, split, expected outcome). Tasks are hidden for holdout cases."""
+    """Seeded benchmark cases (id, family, split, expected outcome).
+
+    Tasks are hidden for holdout cases."""
     return {"cases": [{"id": c["id"], "family": c["family"], "split": c["split"], "expected": c["expected"],
                        "task_preview": (c["task"].split("Then: ")[-1][:160] if c["split"] != "holdout" else "<hidden>")}
                       for c in C.CASES]}
@@ -209,8 +218,9 @@ def list_cases() -> dict:
 @mcp.tool(annotations=RUN)
 def run_worker(case_id: str, rule_text: str = "", reproduce_until_mistake: bool = True, max_attempts: int = 3,
                intervention_type: str = "rule") -> dict:
-    """Run the plain WORKER agent (base manifest, optionally + rule_text) on one seeded case in a fresh
-    sandboxed session and return what it claimed vs. what the deterministic checker found.
+    """Run the plain WORKER agent on one seeded case in a fresh sandboxed session.
+
+    Base manifest, optionally + rule_text. Returns what it claimed vs. what the deterministic checker found.
     With reproduce_until_mistake (default) it re-runs up to max_attempts fresh sessions until the checker
     detects the family mistake; every attempt is kept in the artifact and reported (nothing hidden).
     Synchronous (~30-90s)."""
@@ -297,8 +307,10 @@ def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat
 
 @mcp.tool(annotations=RUN)
 def run_benchmark(rule_text: str, split: str = "", repeat: int = 1, intervention_type: str = "rule") -> dict:
-    """Autoresearch step: run the benchmark (default: holdout + control cases) BEFORE (base manifest)
-    and AFTER (base + rule_text). Returns a job id; poll get_job for the keep/revert decision and
+    """Autoresearch step: run the benchmark before and after applying rule_text.
+
+    Default cases: holdout + control. BEFORE uses the base manifest; AFTER uses base + rule_text.
+    Returns a job id; poll get_job for the keep/revert decision and
     artifact paths. Scoring is deterministic code; blanket refusal cannot win."""
     if intervention_type not in INTERVENTIONS:
         return {"error": f"intervention_type must be one of {INTERVENTIONS}"}
@@ -329,8 +341,9 @@ def run_benchmark(rule_text: str, split: str = "", repeat: int = 1, intervention
 
 @mcp.tool(annotations=RUN)
 def run_transfer(case_id: str, skill_name: str = "", rule_text: str = "", intervention_type: str = "rule") -> dict:
-    """Transfer test: a COMPLETELY FRESH agent (zero history) loads the promoted lesson — as a
-    TrueForge skill (skill_name) and/or rule text — and attempts an unseen task with the same causal
+    """Transfer test: a COMPLETELY FRESH agent (zero history) loads a promoted lesson.
+
+    Loaded as a TrueForge skill (skill_name) and/or rule text — and attempts an unseen task with the same causal
     trap. Returns a job id."""
     if case_id not in C.BY_ID:
         return {"error": f"unknown case {case_id}"}
@@ -350,7 +363,9 @@ def run_transfer(case_id: str, skill_name: str = "", rule_text: str = "", interv
 
 @mcp.tool(annotations=READ)
 def get_job(job_id: str, wait_s: int = 45) -> dict:
-    """Poll a running evaluation job. Blocks server-side up to wait_s seconds (default 45) so one call is
+    """Poll a running evaluation job.
+
+    Blocks server-side up to wait_s seconds (default 45) so one call is
     usually enough; call again if status is still 'running'. status: running | done | error."""
     j = JOBS.get(job_id)
     if not j:
@@ -368,7 +383,9 @@ LEDGER_LOG = ROOT / "ledger" / "ledger.jsonl"
 
 
 def active_lessons() -> list[dict]:
-    """Promoted lessons, replayed from the ledger file (same rules as the ledger server)."""
+    """Promoted lessons, replayed from the ledger file.
+
+    Same rules as the ledger server."""
     lessons: dict[str, dict] = {}
     if not LEDGER_LOG.exists():
         return []
@@ -387,8 +404,10 @@ def active_lessons() -> list[dict]:
 
 
 def harness_manifest(lessons: list[dict] | None = None) -> dict:
-    """The agent-as-of-now: worker model + every active lesson (rule/seed text injected; constraint
-    lessons also enable the evidence schema). This is what the timeline benchmark scores."""
+    """The agent-as-of-now: worker model plus every active lesson.
+
+    Rule/seed text injected; constraint
+    lessons also enable the evidence schema. This is what the timeline benchmark scores."""
     lessons = active_lessons() if lessons is None else lessons
     m = candidate_manifest("")
     rules = [L["rule_text"] for L in lessons if L.get("intervention_type") in ("rule", "check", "constraint", "gate", "structural")]
@@ -406,7 +425,9 @@ def harness_manifest(lessons: list[dict] | None = None) -> dict:
 
 @mcp.tool(annotations=RUN)
 def run_timeline_point(label: str = "", split: str = "", repeat: int = 1) -> dict:
-    """Score the CURRENT harness (worker model + all active lessons) on the benchmark and append a point
+    """Score the CURRENT harness (worker model + all active lessons) on the benchmark.
+
+    Appends a point
     to the improvement timeline (results/timeline_*.json). Default: every non-train case. Returns a job id."""
     lessons = active_lessons()
     cases = C.select(split) if split else [c for c in C.CASES if c["split"] != "train"]
@@ -447,7 +468,9 @@ def _per_family(results: list[dict]) -> dict:
 
 @mcp.tool(annotations=READ)
 def get_timeline() -> dict:
-    """The improvement timeline: every timeline point (ts, active lessons, summary, per-family rates)."""
+    """The improvement timeline: every timeline point.
+
+    Each point has ts, active lessons, summary, per-family rates."""
     pts = []
     for p in sorted(RESULTS.glob("timeline_*.json")):
         try:
@@ -460,7 +483,9 @@ def get_timeline() -> dict:
 
 @mcp.tool(annotations=READ)
 def get_artifact(path: str, max_chars: int = 20000) -> dict:
-    """Return the JSON text of a results/ artifact (for bundling immutable evidence into a skill PR)."""
+    """Return the JSON text of a results/ artifact.
+
+    For bundling immutable evidence into a skill PR."""
     p = (ROOT / path).resolve()
     if RESULTS.resolve() not in p.parents or not p.is_file():
         return {"error": f"not a results/ artifact: {path}"}
@@ -470,7 +495,9 @@ def get_artifact(path: str, max_chars: int = 20000) -> dict:
 
 @mcp.tool(annotations=RUN)
 def set_worker_model(model: str = "openai/gpt-5-6-luna", reasoning_effort: str = "high") -> dict:
-    """Set the model used by ALL worker/base/candidate/transfer runs from now on. Default luna-high.
+    """Set the model used by ALL worker/base/candidate/transfer runs from now on.
+
+    Default luna-high.
     Use openai/gpt-5-4-mini + low to reproduce the easy-family mistakes for a demo."""
     WORKER_MODEL_FILE.write_text(json.dumps({"name": model, "params": {"reasoning_effort": reasoning_effort}}), encoding="utf-8")
     return {"worker_model": worker_model()}
@@ -478,7 +505,9 @@ def set_worker_model(model: str = "openai/gpt-5-6-luna", reasoning_effort: str =
 
 @mcp.tool(annotations=READ)
 def get_sweep_script() -> dict:
-    """Source of autoresearch/sweep.py: a Code Mode script that sweeps intervention variants through the
+    """Source of autoresearch/sweep.py, a Code Mode intervention sweep script.
+
+    Sweeps intervention variants through the
     eval-runner and ledger from inside the sandbox. Write it to /work/sweep.py and run
     `python3 sweep.py '<json config>'`."""
     return {"path": "autoresearch/sweep.py", "content": (ROOT / "autoresearch" / "sweep.py").read_text(encoding="utf-8")}
@@ -486,14 +515,18 @@ def get_sweep_script() -> dict:
 
 @mcp.tool(annotations=READ)
 def budget_status() -> dict:
-    """Project spend vs cap: sums every TrueForge session turn (workers, immune sessions, UI) at published
+    """Project spend vs cap, summed across TrueForge session turns.
+
+    Sums every TrueForge session turn (workers, immune sessions, UI) at published
     per-model prices. run_* tools refuse to start when spent + estimate would exceed cap - reserve."""
     return SP.total_spend()
 
 
 @mcp.tool(annotations=READ)
 def register_skill(skill_name: str, repo_url: str, path: str, ref: str, description: str) -> dict:
-    """Register a promoted lesson (already pushed to GitHub) as a TrueForge skill so fresh agents can load it."""
+    """Register a promoted lesson as a TrueForge skill so fresh agents can load it.
+
+    The lesson must already be pushed to GitHub."""
     m = {"type": "git", "name": skill_name, "url": repo_url, "path": path, "ref": ref, "description": description}
     try:
         return {"registered": tf.put_skill(m)}

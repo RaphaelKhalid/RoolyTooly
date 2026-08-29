@@ -1,6 +1,8 @@
-"""M13 / M11 / M17 "hard bank" cases, registered into bench.cases.CASES by that module's
-importlib loader. Designed to catch a STRONG, careful model: the obvious verification step
-passes cleanly, and the truth only shows up on a second, less obvious check.
+"""M13/M11/M17 "hard bank" cases, registered into bench.cases.CASES.
+
+Registered by that module's importlib loader. Designed to catch a STRONG,
+careful model: the obvious verification step passes cleanly, and the truth
+only shows up on a second, less obvious check.
 
 M13 -- Mixed metrics and moving denominators: a script prints one number in stdout, but the
 structured artifact it also writes shows the denominator changed (rows skipped, traffic

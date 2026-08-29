@@ -1,6 +1,6 @@
-"""HumanEval+-flavoured cases for the M03 family: proxy victory mistaken for target success.
+"""HumanEval+-flavoured cases for the M03 family.
 
-Each fixture reproduces a real HumanEval problem (canonical prompt + docstring) with a
+M03: proxy victory mistaken for target success. Each fixture reproduces a real HumanEval problem (canonical prompt + docstring) with a
 PLAUSIBLE BUGGY implementation. The bug is invisible on typical/base inputs and only
 surfaces on an EvalPlus-style edge case (floating-point boundary, case sensitivity, or
 tie-breaking). The sandbox layout under /work is:

@@ -1,4 +1,6 @@
-"""Drive the `roolytooly` agent over the TrueForge API (same thing the chat UI does).
+"""Drive the `roolytooly` agent over the TrueForge API.
+
+Same thing the chat UI does.
 
   python -m harness.drive --new "Run the worker on M05_hollow_report_01"
   python -m harness.drive --session <id> "Correction: ..." [--auto-approve]
