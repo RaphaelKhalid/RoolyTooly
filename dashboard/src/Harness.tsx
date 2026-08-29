@@ -569,9 +569,9 @@ function ToolChip({ tc, response }: { tc: ToolCall; response?: string }) {
 
   return (
     <div className={`tool-chip ${open ? "open" : ""}`}>
-      <code className="tool-chip-summary" onClick={() => setOpen((o) => !o)}>
-        {open ? "▾" : "▸"} {summary}
-      </code>
+      <button type="button" className="tool-chip-summary" aria-expanded={open} onClick={() => setOpen((o) => !o)}>
+        {open ? "▾" : "▸"} <code>{summary}</code>
+      </button>
       {open && (
         <pre className="tool-chip-detail">
           {`args:\n${prettyJson(args)}\n\nresponse:\n${response !== undefined ? prettyJson(response) : "(no response captured)"}`}
