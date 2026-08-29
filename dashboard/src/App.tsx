@@ -79,7 +79,7 @@ function App() {
           <h2>Where luna still slips</h2>
           <table>
             <thead><tr><th>family</th><th>traps</th><th>repeats</th><th>controls</th></tr></thead>
-            <tbody>{families.map((f) => <tr key={f.family}><td><b>{f.family}</b></td><td>{num(mv(f.trap_runs))}</td><td className={(mv(f.repetition_rate) as number) > 0 ? "bad" : "good"}>{pct(mv(f.repetition_rate))}</td><td>{num(mv(f.controls_passed))}</td></tr>)}</tbody>
+            <tbody>{families.map((f) => <tr key={f.family}><td><b>{f.family}</b></td><td>{num(mv(f.trap_runs))}</td><td className={(mv(f.repetition_rate) as number) > 0 ? "bad" : "good"}>{pct(mv(f.repetition_rate))}</td><td>{typeof mv(f.controls_passed) === "string" ? String(mv(f.controls_passed)) : num(mv(f.controls_passed))}</td></tr>)}</tbody>
           </table>
           <p className="fine">{data.baseline?.artifact ?? ""}</p>
         </div>

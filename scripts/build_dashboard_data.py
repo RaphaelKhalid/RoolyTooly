@@ -297,12 +297,23 @@ def build_spend() -> dict[str, Any]:
 
 
 def build_humaneval(warnings: list[str]) -> dict[str, Any]:
-    """HumanEval+ comparison: latest bare vs harness artifacts, numbers read from files only."""
-    out: dict[str, Any] = {"bare": None, "harness": None}
-    for mode in ("bare", "harness"):
-        path = latest(f"results/humaneval_plus_*_{mode}_*.json")
-        if not path:
+    """Return the latest bare/harness HumanEval+ pair that shares one run label.
+
+    Both modes must come from the same `--label` run so the comparison is like for like."""
+    out: dict[str, Any] = {"bare": None, "harness": None, "label": None}
+    runs: dict[str, dict[str, Path]] = {}
+    for path in sorted(ROOT.glob("results/humaneval_plus_*.json")):
+        parts = path.stem.split("_")  # humaneval_plus_<label>_<mode>_<ts>
+        if len(parts) < 5 or parts[-2] not in ("bare", "harness"):
             continue
+        label = "_".join(parts[2:-2])
+        runs.setdefault(label, {})[parts[-2]] = path
+    complete = [(lbl, modes) for lbl, modes in runs.items() if "bare" in modes and "harness" in modes]
+    chosen = max(complete, key=lambda item: item[1]["harness"].stat().st_mtime) if complete else None
+    if not chosen:
+        return out
+    out["label"] = chosen[0]
+    for mode, path in chosen[1].items():
         obj, error = read_json(path)
         if error or not isinstance(obj, dict):
             warnings.append(error or f"{path.name}: not an object")
@@ -316,7 +327,7 @@ def build_humaneval(warnings: list[str]) -> dict[str, Any]:
 
 
 def build_timeline(warnings: list[str]) -> list[dict[str, Any]]:
-    """Self-improvement timeline points, one per results/timeline_*.json."""
+    """Return one timeline point per results/timeline_*.json file."""
     points: list[dict[str, Any]] = []
     for path in sorted(ROOT.glob("results/timeline_*.json")):
         obj, error = read_json(path)
