@@ -14,18 +14,18 @@ export default async function handler(req: any, res: any) {
     return;
   }
 
-  const rawPath = req.query?.path;
-  const segments: string[] = Array.isArray(rawPath) ? rawPath : rawPath ? [rawPath] : [];
-
-  const search = new URLSearchParams();
-  for (const [key, value] of Object.entries(req.query ?? {})) {
-    if (key === "path") continue;
-    if (Array.isArray(value)) value.forEach((v) => search.append(key, String(v)));
-    else if (value != null) search.append(key, String(value));
+  // Derive the TrueForge path from the request URL itself: /api/tf/<path>?<qs>
+  const reqUrl = new URL(req.url ?? "/", "http://local");
+  let tail = reqUrl.pathname.replace(/^\/api\/tf\/?/, "");
+  if (!tail) {
+    const rawPath = req.query?.path;
+    const segments: string[] = Array.isArray(rawPath) ? rawPath : rawPath ? [String(rawPath)] : [];
+    tail = segments.join("/");
   }
-  const qs = search.toString();
+  reqUrl.searchParams.delete("path");
+  const qs = reqUrl.searchParams.toString();
   const base = TRUEFORGE_URL.replace(/\/+$/, "");
-  const url = `${base}/api/v1/${segments.map(encodeURIComponent).join("/")}${qs ? `?${qs}` : ""}`;
+  const url = `${base}/api/v1/${tail}${qs ? `?${qs}` : ""}`;
 
   const method: string = req.method ?? "GET";
   const hasBody = method !== "GET" && method !== "HEAD";
