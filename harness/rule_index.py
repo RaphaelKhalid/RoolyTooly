@@ -23,6 +23,9 @@ from bench import cases as C  # noqa: E402
 from harness import qodo_lessons as Q  # noqa: E402
 
 _TOK = re.compile(r"[a-z0-9_]+")
+BM25_GATE = 2.0    # calibrate from results/retrieval_bench_*.json: raise if unrelated tasks still select lessons
+NGRAM_GATE = 0.18
+TOP_K = 3          # both retrievers are compared on their top-3 accepted lessons
 STOP = Q._STOPWORDS
 
 
@@ -74,8 +77,8 @@ class LessonIndex:
         rank_ng = {i: r for r, (i, _) in enumerate(sorted(enumerate(ng), key=lambda x: -x[1]))}
         k = 60.0
         # absolute relevance gate: RRF ranks are relative, so a lesson must also show real lexical
-        # evidence (BM25 >= 1.0 or char-3gram cosine >= 0.12) before it can be selected at all
-        fused = [(1 / (k + rank_bm[i]) + 1 / (k + rank_ng[i])) * (1 if (bm[i] >= 2.0 or ng[i] >= 0.18) else 0)
+        # evidence (BM25 >= BM25_GATE or char-3gram cosine >= NGRAM_GATE) before it can be selected
+        fused = [(1 / (k + rank_bm[i]) + 1 / (k + rank_ng[i])) * (1 if (bm[i] >= BM25_GATE or ng[i] >= NGRAM_GATE) else 0)
                  for i in range(len(self.lessons))]
         by_fam: dict[str, float] = defaultdict(float)
         for i, L in enumerate(self.lessons):
@@ -102,36 +105,51 @@ class LessonIndex:
 
 
 def bench(n_queries: int = 10) -> dict:
+    """Compare the local retriever with Qodo rule search on latency and top-3 agreement."""
     idx_doc = json.loads(Q.INDEX.read_text(encoding="utf-8")) if Q.INDEX.exists() else {"index": {}, "receipts": {}}
     lesson_ids = sorted({lid for v in idx_doc["index"].values() if v for lid in v}) or [L["id"] for L in Q.active_lessons()]
     lessons = [L for L in Q.all_lessons() if L["id"] in lesson_ids]
     index = LessonIndex(lessons)
     cases = [c for c in C.CASES if c["split"] != "train"][:n_queries]
-    local_ms, qodo_ms, agree = [], [], 0
+    local_ms, qodo_ms = [], []
+    agree = compared = unavailable = 0
     rows = []
     for c in cases:
         ask = c["task"].split("Then: ")[-1][:300]
-        t0 = time.perf_counter(); local = index.select(ask); local_ms.append((time.perf_counter() - t0) * 1000)
+        t0 = time.perf_counter(); local = index.select(ask, top_k=TOP_K); local_ms.append((time.perf_counter() - t0) * 1000)
         t0 = time.perf_counter()
-        res = Q._qodo("rules", "search", "--query", f"Name: Pre-claim verification for this coding task\nCategory: Correctness\nContent: {ask}", "--top-k", "5", "--scopes", Q.SCOPE)
-        qodo_ms.append((time.perf_counter() - t0) * 1000)
+        try:
+            res = Q._qodo("rules", "search", "--query", f"Name: Pre-claim verification for this coding task\nCategory: Correctness\nContent: {ask}", "--top-k", str(TOP_K), "--scopes", Q.SCOPE)
+        except Exception as exc:  # noqa: BLE001 - a Qodo outage is recorded, never fatal
+            res = {"_error": str(exc)}
+        elapsed = (time.perf_counter() - t0) * 1000
+        if not isinstance(res, dict) or "rules" not in res:
+            unavailable += 1
+            rows.append({"case_id": c["id"], "local": local, "qodo": None, "status": "qodo_unavailable"})
+            print(f"{c['id']:<30} local={local} qodo=UNAVAILABLE", flush=True)
+            continue
+        qodo_ms.append(elapsed)
         qodo = []
-        for r in (res or {}).get("rules", []) if isinstance(res, dict) else []:
+        for r in res["rules"]:
             name = r.get("name") or ""
             if name.startswith(Q.RULE_PREFIX):
                 qodo.append(name[len(Q.RULE_PREFIX):].split(" ")[0])
+        qodo = qodo[:TOP_K]
         same = set(local) == set(qodo)
+        compared += 1
         agree += same
-        rows.append({"case_id": c["id"], "local": local, "qodo": qodo, "agree": same})
+        rows.append({"case_id": c["id"], "local": local, "qodo": qodo, "agree": same, "status": "ok"})
         print(f"{c['id']:<30} local={local} qodo={qodo} {'=' if same else '!='}", flush=True)
-    out = {"n": len(cases), "lessons_indexed": len(lessons),
+    out = {"n": len(cases), "compared": compared, "qodo_unavailable": unavailable, "lessons_indexed": len(lessons),
            "local_ms_median": round(statistics.median(local_ms), 3) if local_ms else None,
            "qodo_ms_median": round(statistics.median(qodo_ms), 1) if qodo_ms else None,
-           "agreement_rate": round(agree / len(cases), 3) if cases else None, "rows": rows,
+           "agreement_rate": round(agree / compared, 3) if compared else None, "rows": rows,
            "ran_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
-    p = ROOT / "results" / f"retrieval_bench_{int(time.time())}.json"
+    out_dir = ROOT / "results"
+    out_dir.mkdir(exist_ok=True)
+    p = out_dir / f"retrieval_bench_{int(time.time())}.json"
     p.write_text(json.dumps(out, indent=2), encoding="utf-8")
-    print(json.dumps({k: out[k] for k in ("n", "lessons_indexed", "local_ms_median", "qodo_ms_median", "agreement_rate")}))
+    print(json.dumps({k: out[k] for k in ("n", "compared", "qodo_unavailable", "lessons_indexed", "local_ms_median", "qodo_ms_median", "agreement_rate")}))
     print("wrote", p.relative_to(ROOT))
     return out
 
