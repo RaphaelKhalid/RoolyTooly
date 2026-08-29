@@ -10,6 +10,7 @@ type Observation = { id?: string; source_url?: string; quote?: string; family?: 
 type Snapshot = {
   generated_at?: string;
   humaneval?: { bare?: HEMode | null; harness?: HEMode | null };
+  livecodebench?: { bare?: HEMode | null; harness?: HEMode | null };
   timeline?: Point[];
   baseline?: { artifact?: string | null; families?: Family[] };
   ledger?: { lessons?: Lesson[]; observations?: Observation[]; observation_counts?: { family?: string; count?: number }[] };
@@ -50,12 +51,13 @@ function App() {
       </header>
 
       <section className="compare">
-        <h2>HumanEval+ · gpt-5.6 luna (high) · bare vs. with harness</h2>
+        <h2>LiveCodeBench-hard (hidden tests) · gpt-5.6 luna (high) · bare vs. with harness</h2>
         <div className="compare-grid">
-          <Column title="bare luna" m={bare} />
-          <Column title="luna + harness" m={harness} accent />
+          <Column title="bare luna" m={data.livecodebench?.bare ?? null} />
+          <Column title="luna + harness" m={data.livecodebench?.harness ?? null} accent />
         </div>
-        <p className="fine">{bare || harness ? `n = ${num(harness?.n ?? bare?.n)} problems · ground truth = plus tests read from out/results.json · ${harness?.artifact ?? bare?.artifact ?? ""}` : "run in progress — no artifact yet"}</p>
+        <p className="fine">{data.livecodebench?.bare || data.livecodebench?.harness ? `n = ${num(data.livecodebench?.harness?.n ?? data.livecodebench?.bare?.n)} problems · ground truth = hidden tests read from out/results.json · ${data.livecodebench?.harness?.artifact ?? data.livecodebench?.bare?.artifact ?? ""}` : "run in progress — no artifact yet"}</p>
+        <p className="fine">pass@1 is the model's number; false completions are the harness's. HumanEval+ (saturated for luna-high, kept as a control): bare {pct(bare?.pass_at_1)} / {pct(bare?.false_completion_rate)} false completions vs. harness {pct(harness?.pass_at_1)} / {pct(harness?.false_completion_rate)} — {bare?.artifact ?? "no artifact"}.</p>
       </section>
 
       <section className="timeline">

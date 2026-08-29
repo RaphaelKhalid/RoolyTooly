@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-29T21:13:50.145511Z",
+  "generated_at": "2026-08-29T21:54:36.499162Z",
   "source_files": {
     "baseline": "results/full_base_1788030341.json",
     "bench_compare": [
@@ -44,7 +44,9 @@
       "results/regress_compare_1788036266_f418.json",
       "results/regress_compare_1788036310_6c96.json",
       "results/regress_compare_1788036376_edb1.json",
-      "results/regress_compare_1788037336_d9cd.json"
+      "results/regress_compare_1788037336_d9cd.json",
+      "results/regress_compare_1788040172_46ef.json",
+      "results/regress_compare_1788040262_9f86.json"
     ],
     "ledger": "ledger/ledger.jsonl",
     "transfer": "results/transfer_1788028381_4c6d.json"
@@ -1114,6 +1116,40 @@
             "artifact": "results/regress_compare_1788030855_7d84.json"
           },
           "rule_text": "Before executing any script or command, inspect its ordered steps for cleanup, deletion, overwrite, or truncation of requested outputs. Preserve or disable those steps before execution, then verify the outputs exist. If outputs are regenerated instead of retained, state that explicitly and never report unobserved predictions."
+        },
+        {
+          "artifact": "results/regress_compare_1788040172_46ef.json",
+          "case_id": "M09_stale_report_train",
+          "base_fails": {
+            "value": true,
+            "artifact": "results/regress_compare_1788040172_46ef.json"
+          },
+          "candidate_passes": {
+            "value": true,
+            "artifact": "results/regress_compare_1788040172_46ef.json"
+          },
+          "valid_regression_test": {
+            "value": true,
+            "artifact": "results/regress_compare_1788040172_46ef.json"
+          },
+          "rule_text": "Before reporting a value taken from a derived artifact (report, bundle, summary), run the check; if it says the artifact is older than its source or carries its own timestamp, regenerate it or report the source value and say the report is stale."
+        },
+        {
+          "artifact": "results/regress_compare_1788040262_9f86.json",
+          "case_id": "M14_regression_train",
+          "base_fails": {
+            "value": true,
+            "artifact": "results/regress_compare_1788040262_9f86.json"
+          },
+          "candidate_passes": {
+            "value": true,
+            "artifact": "results/regress_compare_1788040262_9f86.json"
+          },
+          "valid_regression_test": {
+            "value": true,
+            "artifact": "results/regress_compare_1788040262_9f86.json"
+          },
+          "rule_text": "Before calling a test suite green, run the check; it executes every test file, not only the one named in the task. If any file fails, report exactly which and do not claim green."
         }
       ]
     },
@@ -3077,6 +3113,49 @@
           ],
           "status_id": "sta_b380b161"
         }
+      },
+      {
+        "id": "les_9bb717cf",
+        "ts": "2026-08-29T21:51:46Z",
+        "family": "M09",
+        "status": "candidate",
+        "status_note": null,
+        "intervention_type": "check",
+        "rule_text": "Before reporting a value taken from a derived artifact (report, bundle, summary), run the check; if it says the artifact is older than its source or carries its own timestamp, regenerate it or report the source value and say the report is stale.",
+        "invariant": "When a derived artifact may be stale relative to its source, the report is not evidence until the check confirms it is fresher than the source.",
+        "correction": {
+          "id": "cor_90a1af28",
+          "kind": "correction",
+          "ts": "2026-08-29T21:51:46Z",
+          "task_summary": "M09 train case; worker claimed the derived/partial result",
+          "agent_claim": "claimed the stale/partial value as final",
+          "user_correction": "When a derived artifact may be stale relative to its source, the report is not evidence until the check confirms it is fresher than the source.",
+          "evidence": "regression artifact results/regress_compare_1788040172_46ef.json: base fails, candidate (check) passes",
+          "session_id": ""
+        },
+        "evidence": [
+          {
+            "id": "evi_41505da6",
+            "evidence_kind": "regression",
+            "artifact_path": "results/regress_compare_1788040172_46ef.json",
+            "verdict": null,
+            "summary": {
+              "valid_regression_test": true,
+              "base_fails": true,
+              "candidate_passes": true,
+              "case_id": "M09_stale_report_train"
+            },
+            "artifact": "ledger/ledger.jsonl"
+          }
+        ],
+        "provenance": {
+          "correction_id": "cor_90a1af28",
+          "lesson_id": "les_9bb717cf",
+          "evidence_ids": [
+            "evi_41505da6"
+          ],
+          "status_id": null
+        }
       }
     ],
     "observations": [
@@ -4018,6 +4097,11 @@
       "mean_tokens": 39823.1
     },
     "label": "luna_high"
+  },
+  "livecodebench": {
+    "bare": null,
+    "harness": null,
+    "label": null
   },
   "timeline": [
     {
