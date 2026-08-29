@@ -11,3 +11,4 @@ __pycache__/
 hackathon-kickoff-prompt.md
 results/
 ledger/
+!.env.example
