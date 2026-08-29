@@ -15,8 +15,11 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import subprocess
 import sys
+import time
+import uuid
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -26,6 +29,41 @@ from bench import cases as C  # noqa: E402
 SCOPE = "/RaphaelKhalid/RoolyTooly/"
 RULE_PREFIX = "RoolyTooly lesson "
 INDEX = ROOT / "results" / "lesson_index.json"
+LEDGER = ROOT / "ledger" / "ledger.jsonl"
+
+# Cheap symbolic overlap check (no embeddings): Jaccard over lowercase word sets, stopwords removed.
+_STOPWORDS = {
+    "a", "an", "the", "and", "or", "but", "if", "then", "else", "when", "while", "for", "to", "of",
+    "in", "on", "at", "by", "with", "from", "as", "is", "are", "was", "were", "be", "been", "being",
+    "this", "that", "these", "those", "it", "its", "not", "no", "do", "does", "did", "before",
+    "after", "only", "any", "must", "should", "can", "cannot", "never", "always", "so", "than",
+    "into", "onto", "over", "under", "about", "than", "must", "will", "would", "may", "might",
+    "each", "every", "both", "either", "neither", "you", "your", "we", "our", "i", "they", "their",
+}
+
+
+def _words(text: str) -> set[str]:
+    return {w for w in re.findall(r"[a-z']+", (text or "").lower()) if len(w) > 1 and w not in _STOPWORDS}
+
+
+def _jaccard(a: str, b: str) -> float:
+    wa, wb = _words(a), _words(b)
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
+def _append_ledger(kind: str, **payload) -> dict:
+    """Append a record directly to ledger/ledger.jsonl in the same shape mcp_servers/ledger_server.py writes.
+
+    Only used for records this bridge derives itself (overlap-audit status notes); it never edits
+    an existing line, only appends, matching the ledger's append-only contract."""
+    rec = {"id": payload.pop("id", None) or f"{kind[:3]}_{uuid.uuid4().hex[:8]}", "kind": kind,
+           "ts": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()), **payload}
+    LEDGER.parent.mkdir(parents=True, exist_ok=True)
+    with LEDGER.open("a", encoding="utf-8") as f:
+        f.write(json.dumps(rec) + "\n")
+    return rec
 
 
 def _qodo(*args: str) -> dict | list | None:
@@ -46,7 +84,7 @@ def _qodo(*args: str) -> dict | list | None:
 
 def active_lessons() -> list[dict]:
     lessons: dict[str, dict] = {}
-    log = ROOT / "ledger" / "ledger.jsonl"
+    log = LEDGER
     if not log.exists():
         return []
     for line in log.read_text(encoding="utf-8").splitlines():
@@ -76,12 +114,83 @@ def existing_rule_ids() -> dict[str, int]:
     return found
 
 
+def audit_overlap(lesson: dict) -> dict:
+    """Check whether `lesson` would duplicate an already-shipped Qodo rule before sync() creates one.
+
+    Runs the same scoped Qodo rule search sync() uses for existence checks, keeps only sibling
+    rules (name starts with RULE_PREFIX, lesson id differs from `lesson["id"]`), and scores each
+    against `lesson["rule_text"]` with a cheap symbolic Jaccard (lowercase word sets, stopwords
+    removed) — no embeddings, no extra network call. If the qodo CLI call itself fails (`_qodo`
+    returns None — no CLI on PATH, timeout, bad JSON), this degrades to a Jaccard-only comparison
+    against every other currently-active lesson's rule_text (no Qodo content available) and marks
+    the result `"degraded": True` so callers can say so.
+
+    Returns {"verdict": "overlap"|"review"|"distinct", "degraded": bool, and, unless distinct with
+    no candidates, "with": <sibling lesson id>, "jaccard": <float rounded to 3dp>}.
+    Thresholds: jaccard >= 0.5 -> overlap (do not create); 0.3 <= jaccard < 0.5 -> review (create,
+    but flag for a human); otherwise -> distinct.
+    """
+    query = f"Name: {lesson['invariant']}\nCategory: Correctness\nContent: {lesson['rule_text']}"
+    res = _qodo("rules", "search", "--query", query, "--top-k", "5", "--scopes", SCOPE)
+    degraded = res is None
+    candidates: dict[str, str] = {}
+    if not degraded:
+        for r in (res or {}).get("rules", []) if isinstance(res, dict) else []:
+            name = r.get("name") or ""
+            if not name.startswith(RULE_PREFIX):
+                continue
+            lid = name[len(RULE_PREFIX):].split(" ")[0]
+            if lid != lesson["id"]:
+                candidates[lid] = r.get("content") or ""
+    else:
+        # Qodo CLI unavailable: fall back to symbolic-only comparison against active siblings.
+        for L in active_lessons():
+            if L["id"] != lesson["id"]:
+                candidates[L["id"]] = L.get("rule_text", "")
+
+    best_id, best_j = None, 0.0
+    for lid, text in candidates.items():
+        j = _jaccard(lesson["rule_text"], text)
+        if j > best_j:
+            best_id, best_j = lid, j
+
+    if best_id is None:
+        return {"verdict": "distinct", "degraded": degraded}
+    jaccard = round(best_j, 3)
+    if jaccard >= 0.5:
+        verdict = "overlap"
+    elif jaccard >= 0.3:
+        verdict = "review"
+    else:
+        verdict = "distinct"
+    return {"verdict": verdict, "with": best_id, "jaccard": jaccard, "degraded": degraded}
+
+
+def audit() -> None:
+    """Print (never write) the overlap-audit result for every active lesson."""
+    for L in active_lessons():
+        a = audit_overlap(L)
+        tag = f"~{a['with']} jaccard={a['jaccard']}" if "with" in a else "no siblings"
+        deg = " [degraded: qodo CLI unavailable, symbolic-Jaccard-only]" if a["degraded"] else ""
+        print(f"{a['verdict']:<8} {L['id']} ({L['family']}) {tag}{deg}")
+
+
 def sync() -> None:
     have = existing_rule_ids()
     for L in active_lessons():
         if L["id"] in have:
             print(f"exists  {L['id']} -> rule {have[L['id']]}")
             continue
+        a = audit_overlap(L)
+        deg = " [degraded]" if a["degraded"] else ""
+        if a["verdict"] == "overlap":
+            note = (f"overlap audit: near-duplicate of {a['with']} (jaccard {a['jaccard']}); "
+                    f"not added to Qodo, superseded_by={a['with']}")
+            _append_ledger("status", lesson_id=L["id"], status="active", note=note)
+            print(f"overlap {L['id']} ~ {a['with']} (jaccard={a['jaccard']}){deg} -> not created; ledger note appended")
+            continue
+        if a["verdict"] == "review":
+            print(f"REVIEW  {L['id']} ~ {a.get('with')} (jaccard={a.get('jaccard')}){deg} -> creating rule, needs human review")
         name = f"{RULE_PREFIX}{L['id']} ({L['family']}): {L['invariant'][:80]}"
         res = _qodo("rules", "create", "--name", name[:128], "--category", "Correctness", "--severity", "warning",
                     "--content", L["rule_text"][:600], "--good-examples", L.get("preflight_check") or "",
@@ -113,4 +222,4 @@ def select(top_k: int = 5) -> None:
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "sync"
-    {"sync": sync, "select": select}[cmd]()
+    {"sync": sync, "select": select, "audit": audit}[cmd]()
