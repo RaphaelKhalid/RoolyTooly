@@ -91,7 +91,7 @@ CHECKS_DIR = ROOT / "bench" / "checks"
 
 
 def check_script_text(check_script: str) -> str:
-    """Return the source of a check: a name under bench/checks/ (e.g. m09_stale_derived) or literal code."""
+    """Return a check's source: look it up under bench/checks/, or return it as code."""
     cand = CHECKS_DIR / f"{check_script}.py"
     if cand.exists():
         return cand.read_text(encoding="utf-8")
@@ -99,7 +99,7 @@ def check_script_text(check_script: str) -> str:
 
 
 def check_seed_message(rule_text: str, script: str) -> str:
-    """The seed message that installs an executable check in the sandbox and makes it mandatory."""
+    """Seed message that installs the check script and makes it mandatory."""
     return ("Standing instruction for this session: a verification check is REQUIRED before your final reply. "
             "First install it with exactly this command (one exec call):\n"
             "```bash\nmkdir -p /work/.rooly && cat > /work/.rooly/check.py <<'ROOLYCHECK'\n" + script.rstrip() + "\nROOLYCHECK\n```\n"
@@ -299,6 +299,7 @@ def run_worker(case_id: str, rule_text: str = "", reproduce_until_mistake: bool 
 def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat: int = 2,
                    intervention_type: str = "rule", check_script: str = "") -> dict:
     """Regression test for a candidate rule on `case_id`.
+
     BASE side: the reproduced failure from run_worker (pass its artifact path) — that IS the regression
     case; if omitted, the base manifest is run `repeat` times and fails if any run makes the mistake.
     CANDIDATE side: base + rule_text run `repeat` times; must pass every run.
@@ -453,7 +454,7 @@ UNIVERSAL_INVARIANTS = (
 
 
 def lessons_for_case(case_id: str, lessons: list[dict]) -> list[dict]:
-    """Return only the lessons Qodo rule search selected for this case, when an index exists.
+    """Return the lessons Qodo rule search selected for this case, if an index exists.
 
     results/lesson_index.json is written by `python -m harness.qodo_lessons select` (Windows side,
     where the qodo CLI lives). Without it every active lesson is injected."""

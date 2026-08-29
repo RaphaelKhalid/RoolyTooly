@@ -1,4 +1,4 @@
-"""Run regression tests for executable-check interventions without going through the MCP transport.
+"""Run regression tests for check interventions without the MCP transport.
 
 Usage: python scripts/run_check_regressions.py M09_stale_report_train:m09_stale_derived M14_regression_train:m14_full_suite
 Writes the same regress_compare artifacts the eval-runner writes.

@@ -1,5 +1,6 @@
-"""Morning digest: turns the ledger and the latest eval-runner artifacts into a short, plain
-language note for a human who is not a software engineer.
+"""Morning digest: a short, plain note for a human who is not a software engineer.
+
+Turns the ledger and the latest eval-runner artifacts into that note.
 
     python -m harness.digest [--since ISO]
 
@@ -78,7 +79,7 @@ def _read_ledger() -> list[dict]:
 
 
 def _lesson_maps(records: list[dict]) -> tuple[dict[str, dict], dict[str, str]]:
-    """lesson_id -> lesson record; correction_id -> family of the first lesson compiled from it."""
+    """Map lesson_id to its lesson record, and correction_id to first lesson's family."""
     lessons: dict[str, dict] = {}
     correction_family: dict[str, str] = {}
     for r in records:
