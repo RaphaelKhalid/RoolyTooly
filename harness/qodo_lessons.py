@@ -83,6 +83,25 @@ def _qodo(*args: str) -> dict | list | None:
         return None
 
 
+def all_lessons() -> list[dict]:
+    """Every lesson with its current status (not only active ones)."""
+    lessons: dict[str, dict] = {}
+    if not LEDGER.exists():
+        return []
+    for line in LEDGER.read_text(encoding="utf-8").splitlines():
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(r, dict):
+            continue
+        if r.get("kind") == "lesson":
+            lessons[r["id"]] = {**r, "status": "candidate"}
+        elif r.get("kind") == "status" and r.get("lesson_id") in lessons:
+            lessons[r["lesson_id"]]["status"] = r.get("status")
+    return list(lessons.values())
+
+
 def active_lessons() -> list[dict]:
     lessons: dict[str, dict] = {}
     log = LEDGER
@@ -190,9 +209,10 @@ def audit() -> None:
         print(f"{a['verdict']:<8} {L['id']} ({L['family']}) {tag}{deg}")
 
 
-def sync() -> None:
+def sync(lesson_ids: list[str] | None = None) -> None:
     have = existing_rule_ids()
-    for L in active_lessons():
+    pool = all_lessons() if lesson_ids else active_lessons()
+    for L in [x for x in pool if not lesson_ids or x['id'] in lesson_ids]:
         if L["id"] in have:
             print(f"exists  {L['id']} -> rule {have[L['id']]}")
             continue
@@ -225,13 +245,13 @@ def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
-def select(top_k: int = 5) -> None:
+def select(top_k: int = 5, lesson_ids: list[str] | None = None) -> None:
     """Ask Qodo which lessons apply to each seeded case; write an index with receipts.
 
     Fail-safe: a search failure is recorded as `null` (unknown) for that case, so the eval-runner falls
     back to every active lesson instead of silently injecting nothing. Returned rules are candidates;
     they are accepted only if they map to a currently ACTIVE lesson (deterministic filter)."""
-    lessons = {L["id"]: L for L in active_lessons()}
+    lessons = {L["id"]: L for L in (all_lessons() if lesson_ids else active_lessons()) if not lesson_ids or L["id"] in lesson_ids}
     mapping = {v: k for k, v in mapped_rule_ids().items()}  # rule_id -> lesson_id
     ledger_hash = _sha(LEDGER.read_text(encoding="utf-8")) if LEDGER.exists() else None
     index: dict[str, list[str] | None] = {}
@@ -271,4 +291,10 @@ def select(top_k: int = 5) -> None:
 
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "sync"
-    {"sync": sync, "select": select, "audit": audit}[cmd]()
+    ids = sys.argv[2:] or None
+    if cmd == "sync":
+        sync(ids)
+    elif cmd == "select":
+        select(lesson_ids=ids)
+    else:
+        audit()
