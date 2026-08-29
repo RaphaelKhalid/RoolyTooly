@@ -13,6 +13,7 @@ The qodo CLI is Windows-side (node), so this runs from Windows Python; it never 
 """
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -101,16 +102,30 @@ def active_lessons() -> list[dict]:
     return [L for L in lessons.values() if L["status"] == "active"]
 
 
-def existing_rule_ids() -> dict[str, int]:
-    """Map lesson id -> Qodo ruleId for rules this bridge created (by name prefix)."""
+def mapped_rule_ids() -> dict[str, int]:
+    """Lesson id -> Qodo ruleId from the append-only `qodo_rule` ledger records (authoritative)."""
     found: dict[str, int] = {}
+    if LEDGER.exists():
+        for line in LEDGER.read_text(encoding="utf-8").splitlines():
+            try:
+                r = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(r, dict) and r.get("kind") == "qodo_rule" and r.get("rule_id"):
+                found[r["lesson_id"]] = r["rule_id"]
+    return found
+
+
+def existing_rule_ids() -> dict[str, int]:
+    """Map lesson id -> Qodo ruleId: ledger mapping first, then a name-prefix search as a backstop."""
+    found: dict[str, int] = dict(mapped_rule_ids())
     res = _qodo("rules", "search", "--query", f"Name: {RULE_PREFIX}\nCategory: Correctness\nContent: lesson compiled from a human correction",
                 "--top-k", "50", "--scopes", SCOPE)
     for r in (res or {}).get("rules", []) if isinstance(res, dict) else []:
         name = r.get("name") or ""
         if name.startswith(RULE_PREFIX):
             lid = name[len(RULE_PREFIX):].split(" ")[0]
-            found[lid] = r.get("ruleId") or r.get("id")
+            found.setdefault(lid, r.get("ruleId") or r.get("id"))
     return found
 
 
@@ -195,28 +210,62 @@ def sync() -> None:
         res = _qodo("rules", "create", "--name", name[:128], "--category", "Correctness", "--severity", "warning",
                     "--content", L["rule_text"][:600], "--good-examples", L.get("preflight_check") or "",
                     "--bad-examples", "", "--scopes", SCOPE)
-        print(f"created {L['id']} -> {(res or {}).get('ruleId') if isinstance(res, dict) else res} state={(res or {}).get('state') if isinstance(res, dict) else '?'}")
+        rid = (res or {}).get("ruleId") if isinstance(res, dict) else None
+        state = (res or {}).get("state") if isinstance(res, dict) else None
+        if rid:
+            _append_ledger("qodo_rule", lesson_id=L["id"], rule_id=rid, state=state, scopes=(res or {}).get("scopes"),
+                           note="created by harness.qodo_lessons.sync" + ("" if state == "active" else f"; Qodo state={state} (not active until approved)"))
+        else:
+            _append_ledger("qodo_rule", lesson_id=L["id"], rule_id=None, state="error",
+                           note="Qodo create failed or returned no ruleId; lesson still applies via deterministic fallback")
+        print(f"created {L['id']} -> {rid} state={state}")
+
+
+def _sha(text: str) -> str:
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
 def select(top_k: int = 5) -> None:
-    """For every seeded case, ask Qodo which lessons apply; write results/lesson_index.json."""
+    """Ask Qodo which lessons apply to each seeded case; write an index WITH retrieval receipts.
+
+    Fail-safe: a search failure is recorded as `null` (unknown) for that case, so the eval-runner falls
+    back to every active lesson instead of silently injecting nothing. Returned rules are candidates;
+    they are accepted only if they map to a currently ACTIVE lesson (deterministic filter)."""
     lessons = {L["id"]: L for L in active_lessons()}
-    index: dict[str, list[str]] = {}
+    mapping = {v: k for k, v in mapped_rule_ids().items()}  # rule_id -> lesson_id
+    ledger_hash = _sha(LEDGER.read_text(encoding="utf-8")) if LEDGER.exists() else None
+    index: dict[str, list[str] | None] = {}
+    receipts: dict[str, dict] = {}
     for c in C.CASES:
         ask = c["task"].split("Then: ")[-1][:300]
-        res = _qodo("rules", "search", "--query", f"Name: {RULE_PREFIX}lesson for this task\nCategory: Correctness\nContent: {ask}",
-                    "--top-k", str(top_k), "--scopes", SCOPE)
-        hits = []
-        for r in (res or {}).get("rules", []) if isinstance(res, dict) else []:
+        query = f"Name: Pre-claim verification for this coding task\nCategory: Correctness\nContent: {ask}"
+        res = _qodo("rules", "search", "--query", query, "--top-k", str(top_k), "--scopes", SCOPE)
+        if not isinstance(res, dict) or "rules" not in res:
+            index[c["id"]] = None  # unknown -> fallback to all active lessons at runtime
+            receipts[c["id"]] = {"query_hash": _sha(query), "status": "unknown", "reason": "qodo search failed or returned invalid JSON"}
+            print(f"{c['id']:<32} UNKNOWN (fallback)")
+            continue
+        ranked, accepted, rejected = [], [], []
+        for r in res["rules"]:
+            rid = r.get("ruleId") or r.get("id")
             name = r.get("name") or ""
-            if name.startswith(RULE_PREFIX):
+            ranked.append({"rule_id": rid, "name": name[:80], "score": r.get("score")})
+            lid = mapping.get(rid)
+            if lid is None and name.startswith(RULE_PREFIX):
                 lid = name[len(RULE_PREFIX):].split(" ")[0]
-                if lid in lessons:
-                    hits.append(lid)
-        index[c["id"]] = hits
-        print(f"{c['id']:<32} {hits}")
+            if lid is None:
+                rejected.append({"rule_id": rid, "reason": "not a RoolyTooly lesson rule"})
+            elif lid not in lessons:
+                rejected.append({"rule_id": rid, "lesson_id": lid, "reason": "lesson not active in ledger"})
+            else:
+                accepted.append(lid)
+        index[c["id"]] = accepted
+        receipts[c["id"]] = {"query_hash": _sha(query), "status": "ok", "ranked": ranked, "accepted": accepted, "rejected": rejected}
+        print(f"{c['id']:<32} {accepted}")
     INDEX.parent.mkdir(exist_ok=True)
-    INDEX.write_text(json.dumps({"scope": SCOPE, "top_k": top_k, "index": index}, indent=1), encoding="utf-8")
+    INDEX.write_text(json.dumps({"scope": SCOPE, "top_k": top_k, "ledger_hash": ledger_hash,
+                                 "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                                 "index": index, "receipts": receipts}, indent=1), encoding="utf-8")
     print("wrote", INDEX.relative_to(ROOT))
 
 
