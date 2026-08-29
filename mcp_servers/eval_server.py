@@ -415,12 +415,34 @@ def active_lessons() -> list[dict]:
     return [L for L in lessons.values() if L["status"] == "active"]
 
 
-def harness_manifest(lessons: list[dict] | None = None) -> dict:
+LESSON_INDEX = RESULTS / "lesson_index.json"
+
+
+def lessons_for_case(case_id: str, lessons: list[dict]) -> list[dict]:
+    """Return only the lessons Qodo rule search selected for this case, when an index exists.
+
+    results/lesson_index.json is written by `python -m harness.qodo_lessons select` (Windows side,
+    where the qodo CLI lives). Without it every active lesson is injected."""
+    if not LESSON_INDEX.exists():
+        return lessons
+    try:
+        idx = json.loads(LESSON_INDEX.read_text(encoding="utf-8")).get("index", {})
+    except (OSError, json.JSONDecodeError):
+        return lessons
+    if case_id not in idx:
+        return lessons
+    wanted = set(idx[case_id])
+    return [L for L in lessons if L["id"] in wanted]
+
+
+def harness_manifest(lessons: list[dict] | None = None, case_id: str | None = None) -> dict:
     """The agent-as-of-now: worker model plus every active lesson.
 
     Rule/seed text injected; constraint
     lessons also enable the evidence schema. This is what the timeline benchmark scores."""
     lessons = active_lessons() if lessons is None else lessons
+    if case_id:
+        lessons = lessons_for_case(case_id, lessons)
     m = candidate_manifest("")
     rules = [L["rule_text"] for L in lessons if L.get("intervention_type") in ("rule", "check", "constraint", "gate", "structural")]
     seeds = [L["rule_text"] for L in lessons if L.get("intervention_type") == "seed"]
@@ -449,7 +471,15 @@ def run_timeline_point(label: str = "", split: str = "", repeat: int = 1) -> dic
         return g
 
     def work():
-        rep = run_suite(harness_manifest(lessons), cases, repeat, 2, "timeline")
+        if LESSON_INDEX.exists():
+            # per-case manifests: only the lessons Qodo selected for each task are injected
+            from bench.run import summarize
+            reports = [run_suite(harness_manifest(lessons, c["id"]), [c], repeat, 1, "timeline") for c in cases]
+            results = [r for rp in reports for r in rp["results"]]
+            rep = {"label": "timeline", "manifest": {"per_case_lesson_selection": True}, "summary": summarize(results),
+                   "results": results, "ran_at": time.strftime("%Y-%m-%dT%H:%M:%S")}
+        else:
+            rep = run_suite(harness_manifest(lessons), cases, repeat, 2, "timeline")
         point = {"label": label, "ts": time.time(), "ran_at": rep["ran_at"], "worker_model": worker_model(),
                  "n_active_lessons": len(lessons), "active_lessons": [{"id": L["id"], "family": L["family"],
                                                                           "type": L.get("intervention_type")} for L in lessons],
