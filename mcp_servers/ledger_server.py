@@ -270,6 +270,45 @@ def get_active_lessons() -> dict:
                         for L in active]}
 
 
+@mcp.tool(annotations=APPEND)
+def record_observation(source_url: str, quote: str, family: str, surface: str, causal_trap: str,
+                       proposed_case: str = "", confidence: float = 0.5) -> dict:
+    """Mistake-miner output: one real-world report of an agent mistake found on the web (issue tracker,
+    forum, transcript). quote = verbatim excerpt (<=400 chars); family = Mxx or 'NEW:<name>';
+    surface = the domain/wording; causal_trap = the generalized structure; proposed_case = a one-line
+    seeded-task idea with a deterministic check. Stored append-only; feeds descriptive stats + new cases."""
+    fam_ok = family in FAMILIES or family.startswith("NEW:")
+    if not fam_ok:
+        return {"error": f"family must be one of {sorted(FAMILIES)} or 'NEW:<name>'"}
+    rec = _append("observation", {"source_url": source_url, "quote": quote[:400], "family": family,
+                                  "surface": surface[:200], "causal_trap": causal_trap[:400],
+                                  "proposed_case": proposed_case[:400], "confidence": float(confidence)})
+    return {"observation_id": rec["id"]}
+
+
+@mcp.tool(annotations=READ)
+def observation_stats() -> dict:
+    """Descriptive stats over mined observations: counts per family, top sources, proposed cases."""
+    obs = []
+    with _LOCK:
+        lines = LOG.read_text(encoding="utf-8").splitlines() if LOG.exists() else []
+    for line in lines:
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if r.get("kind") == "observation":
+            obs.append(r)
+    per_family: dict[str, int] = {}
+    for o in obs:
+        per_family[o["family"]] = per_family.get(o["family"], 0) + 1
+    return {"total": len(obs), "per_family": dict(sorted(per_family.items(), key=lambda kv: -kv[1])),
+            "families_named": FAMILIES,
+            "proposed_cases": [{"family": o["family"], "case": o["proposed_case"], "source": o["source_url"]}
+                               for o in obs if o.get("proposed_case")][-20:],
+            "recent": [{"family": o["family"], "quote": o["quote"][:160], "source": o["source_url"]} for o in obs[-10:]]}
+
+
 @mcp.tool(annotations=READ)
 def ledger_summary() -> dict:
     """Counts, quarantined (malformed) lines, and the latest records - for the dashboard and orientation."""
