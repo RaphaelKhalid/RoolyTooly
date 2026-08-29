@@ -442,6 +442,11 @@ def active_lessons() -> list[dict]:
 
 
 LESSON_INDEX = RESULTS / "lesson_index.json"
+UNIVERSAL_INVARIANTS = (
+    "A zero exit code or a printed success line is not evidence; read the artifact the user asked about before reporting it.",
+    "Never delete or overwrite outputs, logs or checkpoints before the requested evidence has been captured.",
+    "Report what you could not verify as unverified - never as a value.",
+)
 
 
 def lessons_for_case(case_id: str, lessons: list[dict]) -> list[dict]:
@@ -455,7 +460,7 @@ def lessons_for_case(case_id: str, lessons: list[dict]) -> list[dict]:
         idx = json.loads(LESSON_INDEX.read_text(encoding="utf-8")).get("index", {})
     except (OSError, json.JSONDecodeError):
         return lessons
-    if case_id not in idx:
+    if case_id not in idx or idx[case_id] is None:  # unknown retrieval -> deterministic fallback: all active
         return lessons
     wanted = set(idx[case_id])
     return [L for L in lessons if L["id"] in wanted]
@@ -470,6 +475,8 @@ def harness_manifest(lessons: list[dict] | None = None, case_id: str | None = No
     if case_id:
         lessons = lessons_for_case(case_id, lessons)
     m = candidate_manifest("")
+    # universal safety invariants: always injected, independent of retrieval
+    m["instructions"] = m["instructions"].rstrip() + "\n\n## Universal invariants\n" + "\n".join(f"- {u}" for u in UNIVERSAL_INVARIANTS)
     rules = [L["rule_text"] for L in lessons if L.get("intervention_type") in ("rule", "check", "constraint", "gate", "structural")]
     seeds = [L["rule_text"] for L in lessons if L.get("intervention_type") == "seed"]
     if rules:
