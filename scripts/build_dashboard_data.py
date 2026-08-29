@@ -9,6 +9,7 @@ missing or malformed.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from collections import Counter, defaultdict
@@ -277,6 +278,94 @@ def build_ledger(records: list[dict[str, Any]], statuses: dict[str, dict[str, An
     }
 
 
+def build_qodo_rules(
+    records: list[dict[str, Any]], statuses: dict[str, dict[str, Any]], artifact: str | None
+) -> dict[str, Any]:
+    """Build the mistake-to-Qodo rule list from append-only ledger mappings."""
+    lessons = {record.get("id"): record for record in records if record.get("kind") == "lesson"}
+    corrections = {record.get("id"): record for record in records if record.get("kind") == "correction"}
+    latest_mapping: dict[str, dict[str, Any]] = {}
+    for record in records:
+        lesson_id = record.get("lesson_id")
+        if (
+            record.get("kind") == "qodo_rule"
+            and isinstance(lesson_id, str)
+            and record.get("rule_id") is not None
+        ):
+            latest_mapping[lesson_id] = record
+
+    rows: list[dict[str, Any]] = []
+    for lesson_id, mapping in latest_mapping.items():
+        lesson = lessons.get(lesson_id) or {}
+        correction = corrections.get(lesson.get("correction_id")) or {}
+        status_record = statuses.get(lesson_id) or {}
+        lesson_status = status_record.get("status") or "candidate"
+        qodo_state = mapping.get("state")
+        rows.append(
+            {
+                "record_id": mapping.get("id"),
+                "rule_id": mapping.get("rule_id"),
+                "qodo_state": qodo_state,
+                "scopes": mapping.get("scopes") if isinstance(mapping.get("scopes"), list) else [],
+                "synced_at": mapping.get("ts"),
+                "lesson_id": lesson_id,
+                "family": lesson.get("family"),
+                "lesson_status": lesson_status,
+                "intervention_type": lesson.get("intervention_type"),
+                "rule_text": lesson.get("rule_text"),
+                "mistake": {
+                    "task_summary": correction.get("task_summary"),
+                    "agent_claim": correction.get("agent_claim"),
+                    "user_correction": correction.get("user_correction"),
+                },
+                "lifecycle_drift": qodo_state == "active" and lesson_status != "active",
+                "artifact": artifact,
+            }
+        )
+    rows.sort(key=lambda row: str(row.get("synced_at") or ""), reverse=True)
+    return {"artifact": artifact, "linked_count": len(rows), "rules": rows}
+
+
+def qodo_catalog_count() -> dict[str, Any]:
+    """Read the workspace rule total without making the dashboard depend on Qodo."""
+    source = "qodo rules list --page 1 --page-size 1 --json"
+    invocation: list[str] | None = None
+    qodo_module = Path.home() / ".qodo" / "bin" / "qodo.mjs"
+    node = shutil.which("node")
+    if qodo_module.exists() and node:
+        invocation = [node, str(qodo_module)]
+    elif qodo := shutil.which("qodo"):
+        invocation = [qodo]
+    if invocation is None:
+        return {"total": metric(None, source), "source": source, "error": "qodo CLI unavailable"}
+
+    try:
+        completed = subprocess.run(
+            [*invocation, "rules", "list", "--page", "1", "--page-size", "1", "--json"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return {"total": metric(None, source), "source": source, "error": "qodo catalog request failed"}
+        parsed = None
+        for line in completed.stdout.splitlines():
+            try:
+                candidate = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict) and "totalCount" in candidate:
+                parsed = candidate
+                break
+        if not isinstance(parsed, dict):
+            return {"total": metric(None, source), "source": source, "error": "qodo catalog response was unreadable"}
+        return {"total": metric(parsed.get("totalCount"), source), "source": source, "error": None}
+    except (OSError, subprocess.TimeoutExpired):
+        return {"total": metric(None, source), "source": source, "error": "qodo catalog request unavailable"}
+
+
 def build_spend() -> dict[str, Any]:
     command = "python -m harness.spend --json"
     try:
@@ -395,6 +484,10 @@ def main() -> None:
         "board": board,
         "interventions": build_interventions(board, regress_pairs, lessons),
         "ledger": build_ledger(ledger_records, statuses, artifact_name(ledger_path)),
+        "qodo": {
+            **build_qodo_rules(ledger_records, statuses, artifact_name(ledger_path)),
+            "workspace_catalog": qodo_catalog_count(),
+        },
         "transfer": {
             "artifact": artifact_name(transfer_path),
             "summary": (transfer_obj or {}).get("summary") if isinstance(transfer_obj, dict) else {},
