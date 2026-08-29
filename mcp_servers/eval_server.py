@@ -146,6 +146,8 @@ def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat
     Returns a job id; poll get_job. valid_regression_test = base_fails AND candidate_passes."""
     if case_id not in C.BY_ID:
         return {"error": f"unknown case {case_id}"}
+    if repeat < 1:
+        return {"error": "repeat must be >= 1"}
     case = C.BY_ID[case_id]
 
     def work():
@@ -158,15 +160,19 @@ def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat
             base_results, bp = base["results"], _save("regress_base", base)
         cand = run_suite(candidate_manifest(rule_text), [case], repeat, 2, "regress_cand")
         cp = _save("regress_cand", cand)
-        base_fails = any(r["mistake_repeated"] for r in base_results if not r.get("error"))
-        cand_ok = [r for r in cand["results"] if not r["error"]]
-        cand_passes = bool(cand_ok) and all(not r["mistake_repeated"] for r in cand_ok)
-        return {"case_id": case_id, "base_artifact": bp, "candidate_artifact": cp,
-                "base_fails": base_fails, "candidate_passes": cand_passes,
-                "valid_regression_test": base_fails and cand_passes,
-                "base_runs": [{"mistake": r["mistake_repeated"], "score": r["score"], "session_id": r["session_id"],
-                               "claim": r["final_message"][:200]} for r in base_results],
-                "candidate": _slim(cand)}
+        base_ok = [r for r in base_results if not r.get("error")]
+        base_fails = bool(base_ok) and any(r["mistake_repeated"] for r in base_ok)
+        cand_errors = [r for r in cand["results"] if r["error"]]
+        cand_passes = (not cand_errors) and len(cand["results"]) == repeat and             all(not r["mistake_repeated"] for r in cand["results"])
+        out = {"case_id": case_id, "rule_text": rule_text, "base_artifact": bp, "candidate_artifact": cp,
+               "base_fails": base_fails, "candidate_passes": cand_passes,
+               "candidate_errors": [r["error"] for r in cand_errors],
+               "valid_regression_test": base_fails and cand_passes,
+               "base_runs": [{"mistake": r["mistake_repeated"], "score": r["score"], "session_id": r["session_id"],
+                              "error": r.get("error"), "claim": r["final_message"][:200]} for r in base_results],
+               "candidate": _slim(cand)}
+        out["artifact"] = _save("regress_compare", out)
+        return out
 
     return {"job_id": _job(work, f"regression:{case_id}")}
 
@@ -176,7 +182,14 @@ def run_benchmark(rule_text: str, split: str = "", repeat: int = 1) -> dict:
     """Autoresearch step: run the benchmark (default: holdout + control cases) BEFORE (base manifest)
     and AFTER (base + rule_text). Returns a job id; poll get_job for the keep/revert decision and
     artifact paths. Scoring is deterministic code; blanket refusal cannot win."""
+    known = {c["split"] for c in C.CASES}
+    if split and split not in known:
+        return {"error": f"unknown split {split!r}; known: {sorted(known)}"}
+    if repeat < 1:
+        return {"error": "repeat must be >= 1"}
     cases = C.select(split) if split else [c for c in C.CASES if c["split"] in ("holdout", "control")]
+    if not cases:
+        return {"error": "no cases selected; refusing to run an empty benchmark"}
 
     def work():
         before = run_suite(load_manifest(BASE_MANIFEST), cases, repeat, 3, "bench_before")
