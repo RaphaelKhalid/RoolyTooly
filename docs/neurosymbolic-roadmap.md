@@ -178,8 +178,9 @@ Replace fixed prompt sweeping with a planner over a small intervention lattice:
 instruction rule -> seed/demonstration -> response constraint -> executable check -> approval gate -> structural change
 ```
 
-`check`, `gate`, and `structural` are planner levels implemented by the surrounding orchestrator/MCP layer;
-they must not be passed to the current evaluator as if it already supports them.
+`check`, `gate`, and `structural` are proposed future planner levels. The current evaluator and sweep implement
+only `rule`, `seed`, and `constraint`; the additional levels must not be passed to them until the surrounding
+orchestrator/MCP layer has concrete semantics and tests for each one.
 
 For each lesson, the planner should choose the least invasive intervention whose preconditions are executable.
 It should use:
