@@ -296,6 +296,11 @@ function Harness() {
 function PipelineStrip({ events }: { events: EventRow[] }) {
   const { active, done } = useMemo(() => derivePipeline(events), [events]);
   const activeStep = PIPELINE_STEPS.find((s) => s.id === active);
+  const activePillRef = useRef<HTMLSpanElement | null>(null);
+
+  useEffect(() => {
+    activePillRef.current?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
+  }, [active]);
 
   return (
     <div className="pipeline">
@@ -304,7 +309,12 @@ function PipelineStrip({ events }: { events: EventRow[] }) {
           const state = s.id === active ? "active" : done.has(s.id) ? "done" : "idle";
           return (
             <div className="pipeline-step" key={s.id}>
-              <span className={`pipeline-pill ${state}`}>{s.label}</span>
+              <span
+                className={`pipeline-pill ${state}`}
+                ref={s.id === active ? activePillRef : undefined}
+              >
+                {s.label}
+              </span>
             </div>
           );
         })}
