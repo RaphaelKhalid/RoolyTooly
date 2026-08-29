@@ -1,4 +1,6 @@
-"""Real HumanEval+ benchmark runner: bare worker vs. harness (worker + active lessons).
+"""Run the real HumanEval+ benchmark, comparing a bare worker to the full harness.
+
+"Harness" means the worker plus its active lessons. Usage:
 
     python scripts/run_humaneval_plus.py --n 30 --parallel 2 --mode both --label demo
     python scripts/run_humaneval_plus.py --n 10 --mode bare --label smoke
@@ -53,7 +55,9 @@ if str(ROOT) not in sys.path:
 
 
 def _install_fake_mcp() -> None:
-    """Copied from tests/conftest.py's stub (see its docstring): the eval-runner MCP server module
+    """Install a stand-in `mcp` module so code that expects it can still import.
+
+    Same stub as tests/conftest.py (see its docstring): the eval-runner MCP server module
     imports `mcp`, which this Windows environment doesn't have installed. If a real `mcp` package
     IS importable, this is a no-op and the real package is used instead."""
     try:
@@ -120,9 +124,10 @@ RESULTS_JSON_RE = re.compile(r"\{[^{}]*\}", re.DOTALL)
 
 
 def _extract_results_json(text: str) -> dict | None:
-    """The LAST `{...}` chunk in `text` that parses as JSON and has a "plus_passed" key. Our
-    results.json is a flat object (bool/str-list/int fields only, no nesting), so a non-greedy
-    brace-matched regex is enough -- no need for a real JSON-in-text scanner."""
+    """Return the last JSON object in `text` that looks like a results.json record.
+
+    Our results.json is a flat object (bool/str-list/int fields only, no nesting), so a
+    non-greedy brace-matched regex is enough -- no need for a real JSON-in-text scanner."""
     best = None
     for m in RESULTS_JSON_RE.finditer(text or ""):
         try:
@@ -176,7 +181,9 @@ _ORIG_RUN_ONE = run_mod.run_one
 
 
 def _run_one_with_truth(case: dict, manifest: dict, *a, **kw) -> dict:
-    """Thin wrapper around bench.run.run_one: right after the turn finishes (best chance the
+    """Run one benchmark case and attach ground truth for its out/results.json file.
+
+    Thin wrapper around bench.run.run_one: right after the turn finishes (best chance the
     Daytona sandbox is still alive), try the TrueForge download endpoint for authoritative ground
     truth, falling back to whatever the trace shows the worker itself read. Failures of either are
     swallowed -- ground truth just stays 'unknown' for that case, never aborts the run."""
