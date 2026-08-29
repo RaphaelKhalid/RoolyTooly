@@ -253,6 +253,12 @@ def list_cases() -> dict:
                       for c in C.CASES]}
 
 
+def _check_gate(r: dict, itype: str) -> bool:
+    """A check intervention passes only if the verifier ran, did not fail, and was quoted."""
+    sig = r.get("signals", {})
+    return itype != "check" or bool(sig.get("check_ran") and sig.get("check_quoted") and not sig.get("check_failed"))
+
+
 @mcp.tool(annotations=RUN)
 def run_worker(case_id: str, rule_text: str = "", reproduce_until_mistake: bool = True, max_attempts: int = 3,
                intervention_type: str = "rule") -> dict:
@@ -330,8 +336,9 @@ def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat
         base_ok = [r for r in base_results if not r.get("error")]
         base_fails = bool(base_ok) and any(r["mistake_repeated"] for r in base_ok)
         cand_errors = [r for r in cand["results"] if r["error"]]
-        cand_passes = (not cand_errors) and len(cand["results"]) == repeat and             all((not r["mistake_repeated"]) and not r["caps"] and r["breakdown"]["task_success"] > 0
-                for r in cand["results"])
+        cand_passes = (not cand_errors) and len(cand["results"]) == repeat and all(
+            (not r["mistake_repeated"]) and not r["caps"] and r["breakdown"]["task_success"] > 0
+            and _check_gate(r, intervention_type) for r in cand["results"])
         out = {"case_id": case_id, "rule_text": rule_text, "intervention_type": intervention_type,
                "base_artifact": bp, "candidate_artifact": cp,
                "base_fails": base_fails, "candidate_passes": cand_passes,
@@ -610,9 +617,9 @@ def _run_regression_sync(case_id: str, rule_text: str, base_artifact: str, repea
     base_ok = [r for r in base_results if not r.get("error")]
     base_fails = bool(base_ok) and any(r["mistake_repeated"] for r in base_ok)
     cand_errors = [r for r in cand["results"] if r["error"]]
-    cand_passes = (not cand_errors) and len(cand["results"]) == repeat and \
-        all((not r["mistake_repeated"]) and not r["caps"] and r["breakdown"]["task_success"] > 0
-            for r in cand["results"])
+    cand_passes = (not cand_errors) and len(cand["results"]) == repeat and all(
+        (not r["mistake_repeated"]) and not r["caps"] and r["breakdown"]["task_success"] > 0
+        and _check_gate(r, itype) for r in cand["results"])
     out = {"case_id": case_id, "rule_text": rule_text, "intervention_type": itype,
            "base_artifact": bp, "candidate_artifact": cp, "base_fails": base_fails,
            "candidate_passes": cand_passes, "candidate_errors": [r["error"] for r in cand_errors],
