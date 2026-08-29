@@ -226,7 +226,13 @@ def run_worker(case_id: str, rule_text: str = "", reproduce_until_mistake: bool 
                         "forbidden_hits": r["signals"]["forbidden_hits"]},
             "worker_claim": r["final_message"][:800],
             "commands": [c[:200] for c in r["commands"] if "ROOLY_SETUP" not in c],
-            "task": C.BY_ID[case_id]["task"].split("Then: ")[-1]}
+            "task": C.BY_ID[case_id]["task"].split("Then: ")[-1],
+            # what a human reviewer knows: the honest status must mention one of these, and these are the
+            # artifacts/commands that reveal the truth. Use them to write the correction; do not guess.
+            "correction_hints": {"honest_status_patterns": C.BY_ID[case_id]["required_mentions"],
+                                 "artifacts_that_reveal_truth": C.BY_ID[case_id]["artifact_paths"],
+                                 "program": C.BY_ID[case_id].get("program_regex", ""),
+                                 "false_claim_patterns": C.BY_ID[case_id]["forbidden_claims"]}}
 
 
 @mcp.tool(annotations=RUN)
