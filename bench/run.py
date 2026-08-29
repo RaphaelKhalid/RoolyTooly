@@ -67,32 +67,43 @@ def _daytona(method: str, path: str):
         return None
 
 
-STALE_STARTED_MIN = 3.0  # a case turn takes 20-90s; a 'started' sandbox older than this is a leak
+STALE_STARTED_MIN = 20.0   # a Code Mode sweep keeps one sandbox busy for up to ~20 min
+POOL_LIMIT = 10            # Daytona free tier: 10 CPU / 30 GiB = 10 live sandboxes
 
 
 def purge_sandboxes(only_idle: bool = True) -> int:
-    """Daytona free tier = 10 live sandboxes (10 CPU / 30 GiB). TrueForge's event sandbox_id is not the
-    Daytona id, so we clean by state/age: idle (stopped/archived) sandboxes are never in use, and
-    'started' sandboxes older than STALE_STARTED_MIN are leaks from failed/abandoned attempts. A broken
-    warm-up otherwise burns a new sandbox per retry and starves the whole pool. Best effort."""
+    """Free Daytona sandbox capacity without touching sandboxes that may be in use.
+
+    Idle sandboxes (stopped/archived/error) are always safe to delete. 'started' sandboxes are
+    deleted only when older than STALE_STARTED_MIN, or - under pool starvation (>= POOL_LIMIT - 1
+    live) - the single oldest one older than 3 min, because a starved pool fails every new case.
+    TrueForge's event sandbox_id is not the provider id, so ownership cannot be checked directly.
+    """
     import datetime
     sb = _daytona("GET", "/sandbox")
     if sb is None:
         return 0
     items = sb if isinstance(sb, list) else (sb.get("items") or sb.get("data") or [])
     now = datetime.datetime.now(datetime.timezone.utc)
-    n = 0
-    for s in items:
-        state = s.get("state")
-        stale = False
+
+    def age_min(s: dict) -> float:
         try:
             created = datetime.datetime.fromisoformat(str(s.get("createdAt", "")).replace("Z", "+00:00"))
-            stale = (now - created).total_seconds() / 60 > STALE_STARTED_MIN
+            return (now - created).total_seconds() / 60
         except ValueError:
-            pass
-        idle = state in ("stopped", "stopping", "archived", "error", "build_failed")
-        if only_idle and not (idle or (state == "started" and stale)):
-            continue
+            return 0.0
+
+    idle_states = ("stopped", "stopping", "archived", "error", "build_failed")
+    victims = [s for s in items if s.get("state") in idle_states]
+    started = sorted((s for s in items if s.get("state") == "started"), key=age_min, reverse=True)
+    victims += [s for s in started if age_min(s) > STALE_STARTED_MIN]
+    live = [s for s in items if s.get("state") not in idle_states]
+    if len(live) >= POOL_LIMIT - 1 and started and age_min(started[0]) > 3 and started[0] not in victims:
+        victims.append(started[0])  # starvation: sacrifice the single oldest started sandbox
+    if not only_idle:
+        victims = items
+    n = 0
+    for s in victims:
         if _daytona("DELETE", f"/sandbox/{s['id']}?force=true") is not None:
             n += 1
     return n
