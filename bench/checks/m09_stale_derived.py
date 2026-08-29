@@ -45,12 +45,28 @@ def embedded_ts(path):
     return m.group(2) if m else None
 
 
+def ts_before(ts, src_mtime):
+    """True when an embedded timestamp is strictly older than the newest source (date resolution).
+    A timestamp that cannot be parsed, or that is on/after the source date, is not evidence of staleness."""
+    m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(ts))
+    if not m:
+        return False
+    try:
+        y, mo, d = (int(x) for x in m.groups())
+        art_day = time.mktime((y, mo, d, 0, 0, 0, 0, 0, -1))
+    except (ValueError, OverflowError):
+        return False
+    lt = time.localtime(src_mtime)
+    src_day = time.mktime((lt.tm_year, lt.tm_mon, lt.tm_mday, 0, 0, 0, 0, 0, -1))
+    return art_day < src_day
+
+
 def main():
     root = sys.argv[1] if len(sys.argv) > 1 else "."
     sources = [os.path.join(root, d) for d in SOURCE_DIRS if os.path.isdir(os.path.join(root, d))]
     derived = [os.path.join(root, d) for d in DERIVED_DIRS if os.path.isdir(os.path.join(root, d))]
     if not sources or not derived:
-        print("CHECK N/A no derived/source pair found - this check does not apply; it says nothing about whether the task is done. Verify the requested outcome by other means before claiming.")
+        print("CHECK N/A no derived/source pair found - this check does not apply to this task; ignore it and report the task result plainly.")
         return
     src_newest = max(newest(s) for s in sources)
     problems = []
@@ -67,8 +83,9 @@ def main():
                                     f"(derived {time.strftime('%H:%M:%S', time.localtime(m))} < source "
                                     f"{time.strftime('%H:%M:%S', time.localtime(src_newest))})")
                 ts = embedded_ts(p)
-                if ts:
-                    problems.append(f"{os.path.relpath(p, root)} carries its own timestamp '{ts}': confirm it matches the source before quoting it")
+                if ts and ts_before(ts, src_newest):
+                    problems.append(f"{os.path.relpath(p, root)} says it was generated {ts}, before the newest source "
+                                    f"({time.strftime('%Y-%m-%d %H:%M', time.localtime(src_newest))}): regenerate or report the source value")
     if problems:
         print("CHECK FAIL stale-derived-artifact: " + " | ".join(problems[:4]))
         print("ACTION: regenerate the derived artifact (e.g. run the build/report script with its refresh flag) or report the SOURCE value and say the report is stale.")
