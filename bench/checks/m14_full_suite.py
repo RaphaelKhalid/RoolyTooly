@@ -1,4 +1,4 @@
-"""Symbolic pre-claim check for family M14 (fix introduces a regression): run EVERY test, not the named one.
+"""Pre-claim check for family M14: run every test, not just the one that was fixed.
 
 Discovers every tests/test_*.py, runs each as its own process, and if the project ships a
 runner (run_tests.py) also runs it with --all when supported. Prints CHECK OK or CHECK FAIL

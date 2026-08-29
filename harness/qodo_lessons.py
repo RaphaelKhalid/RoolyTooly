@@ -1,4 +1,4 @@
-"""Bridge promoted lessons to Qodo rules and retrieve only the relevant ones per task.
+"""Bridge promoted lessons to Qodo rules; retrieve only the relevant ones per task.
 
 Injecting every active lesson into every worker prompt does not scale (the workspace already
 holds 383 rules); Qodo's semantic rule search returns the handful that match a task. Two entry
@@ -55,7 +55,7 @@ def _jaccard(a: str, b: str) -> float:
 
 
 def _append_ledger(kind: str, **payload) -> dict:
-    """Append a record directly to ledger/ledger.jsonl in the same shape mcp_servers/ledger_server.py writes.
+    """Append a record to ledger/ledger.jsonl in the shape ledger_server.py writes.
 
     Only used for records this bridge derives itself (overlap-audit status notes); it never edits
     an existing line, only appends, matching the ledger's append-only contract."""
@@ -68,7 +68,7 @@ def _append_ledger(kind: str, **payload) -> dict:
 
 
 def _qodo(*args: str) -> dict | list | None:
-    """Run the qodo CLI via node directly (the sh launcher mangles leading-slash scope args)."""
+    """Run the qodo CLI via node (the sh launcher mangles leading-slash scope args)."""
     home = Path(os.environ.get("USERPROFILE") or Path.home())
     node = os.environ.get("NODE_EXE", r"C:\Program Files\nodejs\node.exe")
     mjs = home / ".qodo" / "bin" / "qodo.mjs"
@@ -103,7 +103,7 @@ def active_lessons() -> list[dict]:
 
 
 def mapped_rule_ids() -> dict[str, int]:
-    """Lesson id -> Qodo ruleId from the append-only `qodo_rule` ledger records (authoritative)."""
+    """Map lesson id to Qodo ruleId from the append-only `qodo_rule` ledger records."""
     found: dict[str, int] = {}
     if LEDGER.exists():
         for line in LEDGER.read_text(encoding="utf-8").splitlines():
@@ -117,7 +117,7 @@ def mapped_rule_ids() -> dict[str, int]:
 
 
 def existing_rule_ids() -> dict[str, int]:
-    """Map lesson id -> Qodo ruleId: ledger mapping first, then a name-prefix search as a backstop."""
+    """Map lesson id to Qodo ruleId: ledger mapping first, then a name-prefix search."""
     found: dict[str, int] = dict(mapped_rule_ids())
     res = _qodo("rules", "search", "--query", f"Name: {RULE_PREFIX}\nCategory: Correctness\nContent: lesson compiled from a human correction",
                 "--top-k", "50", "--scopes", SCOPE)
@@ -130,7 +130,7 @@ def existing_rule_ids() -> dict[str, int]:
 
 
 def audit_overlap(lesson: dict) -> dict:
-    """Check whether `lesson` would duplicate an already-shipped Qodo rule before sync() creates one.
+    """Check whether `lesson` would duplicate a Qodo rule already shipped by sync().
 
     Runs the same scoped Qodo rule search sync() uses for existence checks, keeps only sibling
     rules (name starts with RULE_PREFIX, lesson id differs from `lesson["id"]`), and scores each
@@ -226,7 +226,7 @@ def _sha(text: str) -> str:
 
 
 def select(top_k: int = 5) -> None:
-    """Ask Qodo which lessons apply to each seeded case; write an index WITH retrieval receipts.
+    """Ask Qodo which lessons apply to each seeded case; write an index with receipts.
 
     Fail-safe: a search failure is recorded as `null` (unknown) for that case, so the eval-runner falls
     back to every active lesson instead of silently injecting nothing. Returned rules are candidates;

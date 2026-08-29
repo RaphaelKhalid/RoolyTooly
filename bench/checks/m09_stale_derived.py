@@ -1,4 +1,4 @@
-"""Symbolic pre-claim check for family M09 (stale state): is any derived artifact older than its source?
+"""Pre-claim check for family M09: is a derived artifact older than its source.
 
 Run from the project root before reporting a value that comes from a derived artifact
 (report, bundle, summary). Prints CHECK OK or CHECK FAIL <reason> and exits 0 either way; the
@@ -28,7 +28,7 @@ def newest(path):
 
 
 def embedded_ts(path):
-    """A timestamp written INSIDE the artifact (JSON key or an ISO date in text), if any."""
+    """A timestamp written inside the artifact (JSON key or ISO date in text), if any."""
     try:
         text = open(path, encoding="utf-8", errors="replace").read(20000)
     except OSError:

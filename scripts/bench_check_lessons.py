@@ -1,4 +1,4 @@
-"""Record executable-check lessons in the ledger and run their keep/revert benchmarks.
+"""Record executable-check lessons in the ledger and run keep/revert benchmarks.
 
 Usage: python scripts/bench_check_lessons.py M09:m09_stale_derived:<regress_artifact> M14:m14_full_suite:<regress_artifact>
 Promotion is NOT done here (approval-gated in the agent); this writes candidate lessons with
