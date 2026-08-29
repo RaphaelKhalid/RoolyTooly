@@ -42,6 +42,16 @@ def latest_timeline_point() -> dict | None:
     return json.loads(pts[-1].read_text(encoding="utf-8")) if pts else None
 
 
+def latest_job(label: str) -> dict | None:
+    """Most recent eval-runner job with this label, from the persisted jobs file."""
+    try:
+        jobs = json.loads((RESULTS / "jobs.json").read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return None
+    matching = [j for j in jobs.values() if j.get("label") == label]
+    return max(matching, key=lambda j: j.get("started", 0)) if matching else None
+
+
 def worst_family(point: dict, exclude: set[str]) -> tuple[str, str] | None:
     """Return the (family, train case id) with the highest repetition rate.
 
@@ -96,6 +106,17 @@ def main() -> None:
         drive_run(sid, f"Sweep {case_id} (Workflow E): find the lowest intervention level that closes {fam} for the "
                        "current worker model; if a variant is kept, promote it, push the skill with evidence to the "
                        "'lessons' branch, run the transfer on the holdout, and open the PR.", a.auto_approve)
+        # the sweep runs as an eval-runner job; if the turn ended while it was running, wait for the job
+        # (results/jobs.json is persisted by the eval server) and resume the agent in a new turn
+        job = latest_job(f"sweep:{case_id}")
+        while job and job.get("status") == "running" and time.time() < deadline:
+            time.sleep(30)
+            job = latest_job(f"sweep:{case_id}")
+        if job and job.get("status") == "done":
+            log(f"round {round_no}: sweep job done; winner={job.get('winner_lesson_id')} closed={job.get('family_closed')}")
+            drive_run(sid, f"The sweep job for {case_id} is done. Call get_job on the latest sweep job for this case, present the "
+                           "trials table, and if winner_lesson_id is set continue Workflow B from step 7 for it (promote, skill "
+                           "with evidence, transfer on the holdout, PR). If no winner, say so.", a.auto_approve)
     log("time budget spent")
 
 

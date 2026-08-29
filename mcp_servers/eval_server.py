@@ -503,6 +503,116 @@ def set_worker_model(model: str = "openai/gpt-5-6-luna", reasoning_effort: str =
     return {"worker_model": worker_model()}
 
 
+def _ledger():
+    """Import the ledger's tool functions (plain functions under the MCP decorator)."""
+    import importlib
+    return importlib.import_module("mcp_servers.ledger_server")
+
+
+def _run_regression_sync(case_id: str, rule_text: str, base_artifact: str, repeat: int, itype: str) -> dict:
+    case = C.BY_ID[case_id]
+    if base_artifact and (ROOT / base_artifact).exists():
+        art = json.loads((ROOT / base_artifact).read_text(encoding="utf-8"))
+        base_results, bp = (art.get("attempts") or art.get("results") or []), base_artifact
+    else:
+        base = run_suite(candidate_manifest(""), [case], repeat, 2, "regress_base")
+        base_results, bp = base["results"], _save("regress_base", base)
+    cand = run_suite(candidate_manifest(rule_text, None, itype), [case], repeat, 2, "regress_cand")
+    cp = _save("regress_cand", cand)
+    base_ok = [r for r in base_results if not r.get("error")]
+    base_fails = bool(base_ok) and any(r["mistake_repeated"] for r in base_ok)
+    cand_errors = [r for r in cand["results"] if r["error"]]
+    cand_passes = (not cand_errors) and len(cand["results"]) == repeat and \
+        all((not r["mistake_repeated"]) and not r["caps"] and r["breakdown"]["task_success"] > 0
+            for r in cand["results"])
+    out = {"case_id": case_id, "rule_text": rule_text, "intervention_type": itype,
+           "base_artifact": bp, "candidate_artifact": cp, "base_fails": base_fails,
+           "candidate_passes": cand_passes, "candidate_errors": [r["error"] for r in cand_errors],
+           "valid_regression_test": base_fails and cand_passes, "candidate": _slim(cand)}
+    out["artifact"] = _save("regress_compare", out)
+    return out
+
+
+def _run_benchmark_sync(rule_text: str, itype: str, repeat: int = 1) -> dict:
+    cases = [c for c in C.CASES if c["split"] in ("holdout", "control")]
+    before = run_suite(candidate_manifest(""), cases, repeat, 3, "bench_before")
+    after = run_suite(candidate_manifest(rule_text, None, itype), cases, repeat, 3, "bench_after")
+    bp, ap = _save("bench_before", before), _save("bench_after", after)
+    d = decide(before["summary"], after["summary"])
+    comp = {"before_artifact": bp, "after_artifact": ap, "before": before["summary"], "after": after["summary"],
+            **d, "rule_text": rule_text, "intervention_type": itype}
+    comp["compare_artifact"] = _save("bench_compare", comp)
+    return comp
+
+
+@mcp.tool(annotations=RUN)
+def run_sweep(case_id: str, correction_id: str, family: str, variants: list[dict],
+              base_artifact: str = "", repeat: int = 2, invariant: str = "") -> dict:
+    """Run an intervention sweep as a server-side job (safe against turn timeouts).
+
+    variants: [{intervention_type: rule|seed|constraint, rule_text, counterexamples?, preflight_check?}]
+    ordered by level. For each: propose lesson -> regression -> (if valid) holdout/control benchmark ->
+    evidence attached -> keep or revert. Stops at the first variant that closes the family
+    (kept with repetition 0). Poll get_job; the result has trials[], winner_lesson_id, family_closed."""
+    if case_id not in C.BY_ID:
+        return {"error": f"unknown case {case_id}"}
+    if not variants:
+        return {"error": "no variants"}
+    for v in variants:
+        if v.get("intervention_type") not in INTERVENTIONS or not v.get("rule_text"):
+            return {"error": f"bad variant {v}"}
+    if (g := budget_guard(len(variants) * (repeat * 2 + 24))):
+        return g
+    LS = _ledger()
+    order = {"rule": 1, "seed": 2, "constraint": 3}
+    variants = sorted(variants, key=lambda v: order[v["intervention_type"]])
+
+    def work():
+        trials, winner = [], None
+        for v in variants:
+            itype, rule = v["intervention_type"], v["rule_text"]
+            row = {"intervention_type": itype, "rule_text": rule, "lesson_id": None, "regression": None,
+                   "benchmark": None, "closed": False, "error": None}
+            prop = LS.propose_lesson(correction_id=correction_id, family=family,
+                                     invariant=v.get("invariant") or invariant, rule_text=rule,
+                                     intervention_type=itype, regression_case_ids=[case_id],
+                                     counterexamples=v.get("counterexamples") or [],
+                                     preflight_check=v.get("preflight_check") or "")
+            if "error" in prop:
+                row["error"] = prop["error"]
+                trials.append(row)
+                continue
+            row["lesson_id"] = prop["lesson_id"]
+            reg = _run_regression_sync(case_id, rule, base_artifact, repeat, itype)
+            row["regression"] = {"valid": reg["valid_regression_test"], "artifact": reg["artifact"],
+                                 "base_fails": reg["base_fails"], "candidate_passes": reg["candidate_passes"]}
+            LS.attach_evidence(lesson_id=row["lesson_id"], kind="regression", artifact_path=reg["artifact"])
+            if not reg["valid_regression_test"]:
+                LS.revert_lesson(lesson_id=row["lesson_id"], reason="sweep: regression invalid")
+                trials.append(row)
+                continue
+            ben = _run_benchmark_sync(rule, itype, 1)
+            row["benchmark"] = {"decision": ben["decision"], "reasons": ben["reasons"], "before": ben["before"],
+                                "after": ben["after"], "compare_artifact": ben["compare_artifact"]}
+            LS.attach_evidence(lesson_id=row["lesson_id"], kind="benchmark", artifact_path=ben["compare_artifact"])
+            if ben["decision"] != "keep":
+                LS.revert_lesson(lesson_id=row["lesson_id"], reason=f"sweep: benchmark revert: {ben['reasons']}")
+                trials.append(row)
+                continue
+            row["closed"] = ben["after"].get("mistake_repetition_rate", 1) == 0
+            winner = winner or row
+            trials.append(row)
+            if row["closed"]:
+                break
+        out = {"case_id": case_id, "family": family, "trials": trials,
+               "winner_lesson_id": winner["lesson_id"] if winner else None,
+               "family_closed": any(t["closed"] for t in trials)}
+        out["artifact"] = _save("sweep", out)
+        return out
+
+    return {"job_id": _job(work, f"sweep:{case_id}")}
+
+
 @mcp.tool(annotations=READ)
 def get_sweep_script() -> dict:
     """Source of autoresearch/sweep.py, a Code Mode intervention sweep script.
