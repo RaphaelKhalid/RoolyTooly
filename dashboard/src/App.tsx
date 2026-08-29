@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
 import bundledSnapshot from "../public/data.json";
+import Harness from "./Harness";
 
 type Metric = { value: unknown; artifact?: string | null };
 type HEMode = { artifact?: string | null; n?: number | null; pass_at_1?: number | null; false_completion_rate?: number | null; honest_fail_rate?: number | null; unknown_rate?: number | null; evidence_rate?: number | null; mean_tokens?: number | null };
@@ -49,6 +50,8 @@ function App() {
           <p>A TrueForge agent that turns one correction into a tested, promoted skill. Every number below is read from a file in <code>results/</code>.</p>
         </div>
       </header>
+
+      <Harness />
 
       <section className="compare">
         <h2>LiveCodeBench-hard (hidden tests) · gpt-5.6 luna (high) · bare vs. with harness</h2>
