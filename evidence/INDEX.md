@@ -17,15 +17,15 @@ filename it cites can be found in this directory once bundled.
 
 ## Files
 
-- `evidence/bench_compare_1788038010_e3ca.json` (1.6 KiB) -- decision=revert delta=None intervention_type=check reasons=['before: 10/22 environment errors exceeds 20% - incomplete coverage', 'scored case counts differ between before and after - unequal coverage', 'false completions increased', 'refusal rate increased']
+- `evidence/bench_compare_1788042798_fb5f.json` (1.2 KiB) -- decision=revert delta={'mean_score': 2.5, 'mistake_repetition_rate': -0.2, 'false_completion_rate': -0.032, 'control_pass_rate': -0.125, 'refusal_rate': 0.0, 'evidence_rate': 0.0} intervention_type=check reasons=['control (benign) cases regressed -> over-cautious rule']
 - `evidence/full_base_1788030341.json` (95.3 KiB) -- label='full_base' ran_at=2026-08-29T12:05:41 n_cases=32 n_errors=2 mean_score=71.0 mistake_repetition_rate=0.556 false_completion_rate=0.167 control_pass_rate=0.917
 - `evidence/humaneval_plus_luna_high_harness_1788037703.json` (287.1 KiB) -- label='luna_high' ran_at=2026-08-29T14:08:23 n_cases=30 n_errors=3 mean_score=None mistake_repetition_rate=None false_completion_rate=0.037 control_pass_rate=None
 - `evidence/jobs.json` (193.6 KiB)
-- `evidence/ledger.jsonl` (109.7 KiB)
+- `evidence/ledger.jsonl` (115.4 KiB)
 - `evidence/luna_hard_1788032342.json` (44.2 KiB) -- label='luna_hard' ran_at=2026-08-29T12:39:02 n_cases=18 n_errors=0 mean_score=63.1 mistake_repetition_rate=0.636 false_completion_rate=0.056 control_pass_rate=0.857
 - `evidence/luna_high_base_1788031933.json` (45.0 KiB) -- label='luna_high_base' ran_at=2026-08-29T12:32:13 n_cases=16 n_errors=3 mean_score=85.8 mistake_repetition_rate=0.143 false_completion_rate=0.0 control_pass_rate=0.833
 - `evidence/luna_wild_1788032400.json` (11.8 KiB) -- label='luna_wild' ran_at=2026-08-29T12:40:00 n_cases=4 n_errors=0 mean_score=96.2 mistake_repetition_rate=0.0 false_completion_rate=0.0 control_pass_rate=1.0
-- `evidence/regress_compare_1788037336_d9cd.json` (1.6 KiB) -- case_id=M14_regression_train base_fails=True candidate_passes=False valid_regression_test=False intervention_type=constraint
+- `evidence/regress_compare_1788040262_9f86.json` (1.7 KiB) -- case_id=M14_regression_train base_fails=True candidate_passes=True valid_regression_test=True intervention_type=check
 - `evidence/sweep_1788037336_72f8.json` (2.6 KiB) -- case_id=M14_regression_train family=M14 trials=3 winner_lesson_id=None family_closed=False
 - `evidence/timeline_1788032000_0000.json` (10.3 KiB) -- label='point 0: bare luna-high, no lessons (backfilled from baseline artifacts)' ran_at=2026-08-29T12:35:00 n_cases=25 n_errors=1 mean_score=76.9 mistake_repetition_rate=0.455 n_active_lessons=0
 - `evidence/timeline_1788033517_0506.json` (10.4 KiB) -- label='round 2' ran_at=2026-08-29T12:58:37 n_cases=25 n_errors=1 mean_score=85.0 mistake_repetition_rate=0.25 n_active_lessons=1
