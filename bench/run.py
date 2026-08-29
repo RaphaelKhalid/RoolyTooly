@@ -67,41 +67,18 @@ def _daytona(method: str, path: str):
         return None
 
 
-STALE_STARTED_MIN = 20.0   # a Code Mode sweep keeps one sandbox busy for up to ~20 min
-POOL_LIMIT = 10            # Daytona free tier: 10 CPU / 30 GiB = 10 live sandboxes
-
-
 def purge_sandboxes(only_idle: bool = True) -> int:
-    """Free Daytona sandbox capacity without touching sandboxes that may be in use.
-
-    Idle sandboxes (stopped/archived/error) are always safe to delete. 'started' sandboxes are
-    deleted only when older than STALE_STARTED_MIN, or - under pool starvation (>= POOL_LIMIT - 1
-    live) - the single oldest one older than 3 min, because a starved pool fails every new case.
-    TrueForge's event sandbox_id is not the provider id, so ownership cannot be checked directly.
-    """
-    import datetime
+    """Free capacity by deleting only terminal Daytona sandboxes."""
     sb = _daytona("GET", "/sandbox")
     if sb is None:
         return 0
     items = sb if isinstance(sb, list) else (sb.get("items") or sb.get("data") or [])
-    now = datetime.datetime.now(datetime.timezone.utc)
-
-    def age_min(s: dict) -> float:
-        try:
-            created = datetime.datetime.fromisoformat(str(s.get("createdAt", "")).replace("Z", "+00:00"))
-            return (now - created).total_seconds() / 60
-        except ValueError:
-            return 0.0
-
     idle_states = ("stopped", "stopping", "archived", "error", "build_failed")
     victims = [s for s in items if s.get("state") in idle_states]
-    started = sorted((s for s in items if s.get("state") == "started"), key=age_min, reverse=True)
-    victims += [s for s in started if age_min(s) > STALE_STARTED_MIN]
-    live = [s for s in items if s.get("state") not in idle_states]
-    if len(live) >= POOL_LIMIT - 1 and started and age_min(started[0]) > 3 and started[0] not in victims:
-        victims.append(started[0])  # starvation: sacrifice the single oldest started sandbox
-    if not only_idle:
-        victims = items
+    # The provider response has no reliable ownership marker. Age, pool pressure, or an
+    # explicit cleanup mode cannot prove that a started sandbox is abandoned, so never
+    # force-delete a live evaluation from this global cleanup path. Keep the argument for
+    # API compatibility with existing callers; it no longer broadens the deletion set.
     n = 0
     for s in victims:
         if _daytona("DELETE", f"/sandbox/{s['id']}?force=true") is not None:

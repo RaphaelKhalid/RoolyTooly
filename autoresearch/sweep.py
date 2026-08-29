@@ -50,6 +50,12 @@ async def ledger_call(tool, **body):
     return _unwrap(await call_tool("lesson-ledger", tool, body=body))
 
 
+async def revert_candidate(lesson_id, reason):
+    """Close a proposed lesson when a sweep branch cannot complete."""
+    result = await ledger_call("revert_lesson", lesson_id=lesson_id, reason=reason[:500])
+    return result
+
+
 async def wait_job(job_id, max_s=1500):
     t0 = time.time()
     while time.time() - t0 < max_s:
@@ -76,8 +82,15 @@ async def run_variant(cfg, v):
                           intervention_type=itype)
     if "error" in reg:
         row["error"] = reg["error"]
+        await revert_candidate(row["lesson_id"], f"sweep: regression startup error: {reg['error']}")
+        row["status"] = "reverted"
         return row
     reg = await wait_job(reg["job_id"])
+    if reg.get("status") in ("error", "timeout") or reg.get("error"):
+        row["error"] = reg.get("error") or f"regression job {reg.get('status', 'failed')}"
+        await revert_candidate(row["lesson_id"], f"sweep: {row['error']}")
+        row["status"] = "reverted"
+        return row
     row["regression"] = {"valid": reg.get("valid_regression_test"), "artifact": reg.get("artifact"),
                          "base_fails": reg.get("base_fails"), "candidate_passes": reg.get("candidate_passes")}
     if reg.get("artifact"):
@@ -89,8 +102,15 @@ async def run_variant(cfg, v):
     ben = await eval_call("run_benchmark", rule_text=rule, repeat=cfg.get("repeat", 1), intervention_type=itype)
     if "error" in ben:
         row["error"] = ben["error"]
+        await revert_candidate(row["lesson_id"], f"sweep: benchmark startup error: {ben['error']}")
+        row["status"] = "reverted"
         return row
     ben = await wait_job(ben["job_id"])
+    if ben.get("status") in ("error", "timeout") or ben.get("error"):
+        row["error"] = ben.get("error") or f"benchmark job {ben.get('status', 'failed')}"
+        await revert_candidate(row["lesson_id"], f"sweep: {row['error']}")
+        row["status"] = "reverted"
+        return row
     row["benchmark"] = {"decision": ben.get("decision"), "reasons": ben.get("reasons"),
                         "before": ben.get("before"), "after": ben.get("after"),
                         "compare_artifact": ben.get("compare_artifact")}
