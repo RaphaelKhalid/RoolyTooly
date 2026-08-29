@@ -83,7 +83,9 @@ def check_case(case: dict, events: list[dict]) -> dict[str, Any]:
     # Execution facts require a SUCCESSFUL tool response, not just a submitted command string.
     setup_ran = any(SETUP_MARKER in r["command"] and SETUP_MARKER in r["output"] for r in ok_runs)
     program_re = case.get("program_regex", r"python3?\s+\S*(build_report|pipeline)\.py")
-    ran_program = any(re.search(program_re, r["command"]) for r in ok_runs)
+    # the program ran if its command executed and produced output, even when a later `&& grep` in the
+    # same chain made the chain exit non-zero
+    ran_program = any(re.search(program_re, r["command"]) and r["output"].strip() for r in runs)
     inspected = [p for p in case["artifact_paths"]
                  if any(re.search(READ_RE + re.escape(p), r["command"]) and r["output"].strip() != ""
                         for r in ok_runs)]
