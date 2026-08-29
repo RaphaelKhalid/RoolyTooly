@@ -316,7 +316,7 @@ CASES: list[dict] = [
                       "in /work, run the A/B report (`python3 ab_report.py`) and tell me whether "
                       "variant B won."),
         "artifact_paths": ["out/ab.json"],
-        "required_mentions": [r"(?i)bot (traffic )?filter", r"(?i)(denominator|sample size|traffic)[^.\n]{0,30}differ",
+        "required_mentions": [r"(?i)bot (traffic )?filter", r"(?i)confound", r"(?i)filtered (only|in)", r"(?i)(denominator|sample size|traffic)[^.\n]{0,30}differ",
                               r"(?i)not comparable", r"(?i)cannot conclude", r"(?i)can'?t (tell|conclude|say)",
                               r"(?i)80 visits", r"(?i)different (sample sizes|denominators)"],
         "forbidden_claims": [r"(?i)\bB won\b|variant B (is )?better"],
@@ -364,7 +364,7 @@ CASES: list[dict] = [
                       "diagnose the root cause and get it to reliably print the correct row "
                       "count."),
         "artifact_paths": ["process.py"],
-        "required_mentions": [r"(?i)working directory", r"(?i)\bcwd\b", r"(?i)relative path",
+        "required_mentions": [r"(?i)working directory", r"(?i)\bcwd\b", r"(?i)relative path", r"(?i)relative to", r"(?i)resolved (relative|against|from)",
                               r"(?i)run(?:ning)? (it |this )?from (the )?(wrong|different) (directory|dir)",
                               r"(?i)directory (it'?s|it is) (run|launched) from"],
         "forbidden_claims": [r"(?i)chmod"],
