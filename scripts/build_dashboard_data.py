@@ -130,7 +130,7 @@ def build_baseline(path: Path | None, obj: dict[str, Any] | None) -> dict[str, A
         traps = [result for result in results if result.get("split") != "control"]
         controls = [result for result in results if result.get("split") == "control"]
         mistakes = [result for result in traps if result.get("mistake_repeated") is True]
-        passed_controls = [result for result in controls if isinstance(result.get("score"), (int, float)) and result["score"] >= 100]
+        passed_controls = [result for result in controls if ((result.get("breakdown") or {}).get("task_success", 0) or 0) > 0]  # same definition as the checker
         scores = [result.get("score") for result in traps if isinstance(result.get("score"), (int, float))]
         bad_cases = sorted(
             [result for result in traps if isinstance(result.get("score"), (int, float))],
@@ -229,7 +229,7 @@ def build_ledger(records: list[dict[str, Any]], statuses: dict[str, dict[str, An
     observations = [record for record in records if record.get("kind") == "observation"]
     evidence_by_lesson: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in evidence:
-        summary = record.get("summary") if isinstance(record.get("summary"), dict) else {}
+        summary = record.get("derived") if isinstance(record.get("derived"), dict) else (record.get("summary") if isinstance(record.get("summary"), dict) else {})
         verdict = summary.get("decision")
         if verdict is None and "passed" in summary:
             verdict = "passed" if summary.get("passed") else "failed"
@@ -297,9 +297,10 @@ def build_spend() -> dict[str, Any]:
 
 
 def build_humaneval(warnings: list[str]) -> dict[str, Any]:
-    """Return the latest bare/harness HumanEval+ pair that shares one run label.
+    """Return the latest paired bare and harness HumanEval+ runs sharing one label.
 
-    Both modes must come from the same `--label` run so the comparison is like for like."""
+    "Bare" is the worker alone; "harness" is the worker plus its active lessons. Both modes
+    must come from the same `--label` run so the comparison is like for like."""
     out: dict[str, Any] = {"bare": None, "harness": None, "label": None}
     runs: dict[str, dict[str, Path]] = {}
     for path in sorted(ROOT.glob("results/humaneval_plus_*.json")):
@@ -327,7 +328,9 @@ def build_humaneval(warnings: list[str]) -> dict[str, Any]:
 
 
 def build_timeline(warnings: list[str]) -> list[dict[str, Any]]:
-    """Return one timeline point per results/timeline_*.json file."""
+    """Return one benchmark-run summary per saved timeline snapshot, for trend charts.
+
+    Reads every results/timeline_*.json file on disk, one point per file."""
     points: list[dict[str, Any]] = []
     for path in sorted(ROOT.glob("results/timeline_*.json")):
         obj, error = read_json(path)
