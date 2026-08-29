@@ -35,7 +35,7 @@ def main():
         if "FAIL" in out.upper() and "PASS" in out.upper() and code == 0:
             failures.append("run_tests.py --all reports at least one failing file")
     if not files and not runner_note:
-        print("CHECK OK (no tests/ directory found)")
+        print("CHECK N/A no tests/ directory found - this check does not apply; it says nothing about whether the task is done.")
         return
     if failures:
         print(f"CHECK FAIL {len(failures)} of {len(files)} test files fail: " + " ; ".join(failures[:4]) + runner_note)
