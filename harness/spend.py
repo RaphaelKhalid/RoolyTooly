@@ -1,4 +1,6 @@
-"""Project spend tracker for the TrueForge harness (TrueForge has no native budget cap).
+"""Project spend tracker for the TrueForge harness.
+
+TrueForge has no native budget cap.
 
 Sums token metrics of EVERY session turn on the local TrueForge (worker runs, immune-system
 sessions, UI chats) and prices them with the model's published rates. Cache reads are billed at

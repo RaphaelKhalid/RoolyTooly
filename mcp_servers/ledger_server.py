@@ -1,4 +1,6 @@
-"""lesson-ledger MCP server — append-only record of corrections and compiled lessons.
+"""lesson-ledger MCP server — an append-only record.
+
+Records corrections and compiled lessons.
 
     correction -> family -> rule (candidate) -> evidence -> promoted (approval-gated) -> skill
 
@@ -36,13 +38,18 @@ FAMILIES = {
     "M06": "'Done' means an artifact exists",
     "M07": "Evidence destroyed before evaluation",
     "M09": "Stale-state insistence",
+    "M10": "Environment blindness",
+    "M11": "Semantic misdiagnosis",
+    "M12": "Scope inflation",
+    "M13": "Mixed metrics and moving denominators",
     "M14": "Fix introduces a regression",
     "M17": "Avoidable caveat masquerading as diligence",
+    "M20": "Placeholder hazard",
     "M21": "Promise dropped after interruption",
     "M22": "Repeating a corrected mistake",
     "M23": "Representation and deliverable mismatch",
 }
-INTERVENTIONS = ("rule", "check", "gate", "constraint")
+INTERVENTIONS = ("rule", "seed", "constraint", "check", "gate", "structural")
 EVIDENCE_KINDS = ("regression", "benchmark", "falsifier", "transfer")
 
 mcp = FastMCP("lesson-ledger", host="127.0.0.1", port=int(os.environ.get("ROOLY_LEDGER_PORT", "8901")),
@@ -68,7 +75,9 @@ def _append(kind: str, payload: dict) -> dict:
 
 
 def _replay() -> dict:
-    """Derive current state from the append-only log. Malformed lines are quarantined (counted and
+    """Derive current state from the append-only log.
+
+    Malformed lines are quarantined (counted and
     reported), never fatal: one bad record must not disable the ledger."""
     corrections: dict[str, dict] = {}
     lessons: dict[str, dict] = {}
@@ -97,7 +106,9 @@ def _replay() -> dict:
 
 
 def _artifact(path: str) -> tuple[Path | None, str | None]:
-    """Resolve an evidence artifact path; only files inside results/ written by the eval-runner count."""
+    """Resolve an evidence artifact path.
+
+    Only files inside results/ written by the eval-runner count."""
     p = (ROOT / path).resolve() if not Path(path).is_absolute() else Path(path).resolve()
     if RESULTS not in p.parents:
         return None, f"artifact must live under results/ (eval-runner output), got {path}"
@@ -107,7 +118,9 @@ def _artifact(path: str) -> tuple[Path | None, str | None]:
 
 
 def _derive(kind: str, data: dict) -> tuple[dict, str | None]:
-    """Compute the verdict from the artifact contents. The caller's opinion is never used."""
+    """Compute the verdict from the artifact contents.
+
+    The caller's opinion is never used."""
     if kind == "regression":
         if "valid_regression_test" not in data:
             return {}, "artifact is not a regression result (no valid_regression_test field)"
@@ -172,7 +185,9 @@ def propose_lesson(correction_id: str, family: str, invariant: str, rule_text: s
 
 @mcp.tool(annotations=APPEND)
 def attach_evidence(lesson_id: str, kind: str, artifact_path: str, note: str = "") -> dict:
-    """Attach evidence to a candidate lesson. kind: regression | benchmark | transfer | falsifier.
+    """Attach evidence to a candidate lesson.
+
+    kind: regression | benchmark | transfer | falsifier.
     For regression/benchmark/transfer the artifact must be an eval-runner file under results/; the
     verdict is READ FROM THE FILE (valid_regression_test / decision) - a caller cannot assert it."""
     if kind not in EVIDENCE_KINDS:
@@ -219,7 +234,9 @@ def _promotion_blockers(L: dict) -> list[str]:
 
 @mcp.tool(annotations=PROMOTE)
 def promote_lesson(lesson_id: str, decision_note: str = "") -> dict:
-    """PROMOTE a candidate lesson to ACTIVE so every future agent loads it. Irreversible - requires
+    """PROMOTE a candidate lesson to ACTIVE so every future agent loads it.
+
+    Irreversible - requires
     human approval. Refuses unless file-derived regression AND benchmark evidence say: valid
     regression test, and benchmark decision = keep."""
     with _LOCK:
@@ -239,7 +256,9 @@ def promote_lesson(lesson_id: str, decision_note: str = "") -> dict:
 
 @mcp.tool(annotations=APPEND)
 def revert_lesson(lesson_id: str, reason: str) -> dict:
-    """Mark a CANDIDATE lesson as reverted (benchmark regressed or falsifier won). Only candidates
+    """Mark a CANDIDATE lesson as reverted (benchmark regressed or falsifier won).
+
+    Only candidates
     can be reverted; unknown or already-decided lessons are rejected."""
     with _LOCK:
         L = _replay()["lessons"].get(lesson_id)
@@ -253,7 +272,9 @@ def revert_lesson(lesson_id: str, reason: str) -> dict:
 
 @mcp.tool(annotations=READ)
 def get_lesson(lesson_id: str) -> dict:
-    """Full lesson record with evidence (file-derived verdicts), promotion blockers, and status history."""
+    """Full lesson record with evidence, promotion blockers, and status history.
+
+    Evidence entries carry file-derived verdicts."""
     L = _replay()["lessons"].get(lesson_id)
     if not L:
         return {"error": "unknown lesson"}
@@ -318,7 +339,9 @@ def observation_stats() -> dict:
 
 @mcp.tool(annotations=READ)
 def ledger_summary() -> dict:
-    """Counts, quarantined (malformed) lines, and the latest records - for the dashboard and orientation."""
+    """Counts, quarantined lines, and the latest records.
+
+    Quarantined means malformed. For the dashboard and orientation."""
     st = _replay()
     return {"corrections": len(st["corrections"]),
             "lessons": {s: sum(1 for L in st["lessons"].values() if L["status"] == s)

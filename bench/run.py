@@ -68,16 +68,19 @@ def _daytona(method: str, path: str):
 
 
 def purge_sandboxes(only_idle: bool = True) -> int:
-    """Daytona free tier = 10 live sandboxes (10 CPU / 30 GiB). TrueForge's event sandbox_id is not the
-    Daytona id, so we clean by state: idle (stopped/archived) sandboxes are never in use. Best effort."""
+    """Free capacity by deleting only terminal Daytona sandboxes."""
     sb = _daytona("GET", "/sandbox")
     if sb is None:
         return 0
     items = sb if isinstance(sb, list) else (sb.get("items") or sb.get("data") or [])
+    idle_states = ("stopped", "stopping", "archived", "error", "build_failed")
+    victims = [s for s in items if s.get("state") in idle_states]
+    # The provider response has no reliable ownership marker. Age, pool pressure, or an
+    # explicit cleanup mode cannot prove that a started sandbox is abandoned, so never
+    # force-delete a live evaluation from this global cleanup path. Keep the argument for
+    # API compatibility with existing callers; it no longer broadens the deletion set.
     n = 0
-    for s in items:
-        if only_idle and s.get("state") not in ("stopped", "archived", "error", "build_failed"):
-            continue
+    for s in victims:
         if _daytona("DELETE", f"/sandbox/{s['id']}?force=true") is not None:
             n += 1
     return n
