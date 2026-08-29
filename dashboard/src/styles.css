@@ -87,3 +87,85 @@ footer { margin-top: 44px; padding-top: 16px; border-top: 1px solid var(--line);
   .hero-inner { padding: 44px 20px; }
   .transfer-row { grid-template-columns: 1fr; }
 }
+
+.harness { padding: 24px 28px; border: 1px solid var(--line); background: #fff; }
+.harness-auth { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.harness-auth input { padding: 8px 10px; border: 1px solid var(--line); font-size: 13px; font-family: inherit; min-width: 220px; }
+.harness-error { margin: 0 0 14px; padding: 10px 12px; border-left: 3px solid var(--bad); background: #fff5f9; color: var(--burgundy); font-size: 13px; }
+.harness-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+.harness button { padding: 8px 14px; border: 1px solid var(--fuchsia); background: #fff; color: var(--fuchsia); font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; }
+.harness button:hover:not(:disabled) { background: #fff5f9; }
+.harness button:disabled { opacity: .45; cursor: default; }
+.harness button.deny { border-color: var(--muted); color: var(--muted); }
+.harness-compose { margin-bottom: 14px; }
+.harness-compose textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line); font-family: inherit; font-size: 13px; resize: vertical; }
+.harness-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.harness-presets button { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.approval-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--fuchsia); background: #fff5f9; font-size: 13px; }
+.approval-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.pipeline { margin: 4px 0 14px; }
+.pipeline-strip { display: flex; align-items: center; overflow-x: auto; padding-bottom: 6px; }
+.pipeline-step { display: flex; align-items: center; flex: 0 0 auto; }
+.pipeline-step:not(:first-child)::before { content: ""; width: 16px; height: 1px; flex: 0 0 auto; background: var(--line); margin: 0 4px; }
+.pipeline-pill { padding: 4px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; letter-spacing: .03em; white-space: nowrap; border: 1px solid var(--line); color: var(--muted); background: #fff; }
+.pipeline-pill.done { border-color: var(--burgundy); color: var(--burgundy); background: #fff5f9; }
+.pipeline-pill.active { border-color: var(--fuchsia); color: #fff; background: var(--fuchsia); animation: pipeline-pulse 1.6s ease-in-out infinite; }
+.pipeline-caption { margin: 8px 0 0; font-size: 12px; color: var(--muted); }
+@keyframes pipeline-pulse {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(194, 24, 91, .45); }
+  50% { box-shadow: 0 0 0 6px rgba(194, 24, 91, 0); }
+}
+
+.harness-feed { max-height: 420px; overflow-y: auto; margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+.feed-item { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.45; }
+.feed-item p { margin: 4px 0 0; }
+.feed-item.sub { margin-left: 22px; padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); }
+.feed-item.response { color: var(--muted); font-family: "IBM Plex Mono", Consolas, monospace; font-size: 12px; }
+.feed-item.meta { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.feed-tool { margin-top: 4px; font-family: "IBM Plex Mono", Consolas, monospace; font-size: 12px; color: var(--burgundy); }
+
+@media (max-width: 600px) {
+  main { padding: 0 16px 32px; }
+
+  .hero { margin: 0 -16px; }
+  .hero-inner { padding: 32px 16px 28px; }
+  .hero h1 { font-size: 28px; }
+  .hero p { font-size: 14px; }
+
+  section { margin-top: 32px; }
+  .compare, .transfer { padding: 16px; }
+
+  table { display: block; width: 100%; max-width: 100%; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  .harness { padding: 16px; }
+
+  .harness-auth { flex-direction: column; align-items: stretch; gap: 8px; }
+  .harness-controls { flex-direction: column; align-items: stretch; gap: 8px; }
+  .harness-controls .fine { white-space: normal; overflow-wrap: anywhere; }
+
+  .harness-auth input,
+  .harness button { min-height: 44px; width: 100%; }
+
+  .harness-compose textarea { width: 100%; }
+
+  .harness-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .harness-presets button {
+    max-width: none;
+    width: 100%;
+    min-height: 44px;
+    white-space: normal;
+    overflow: visible;
+    text-overflow: clip;
+    line-height: 1.3;
+  }
+  .harness-presets button:last-child { grid-column: 1 / -1; }
+
+  .pipeline-strip { overflow-x: auto; white-space: nowrap; flex-wrap: nowrap; -webkit-overflow-scrolling: touch; }
+  .pipeline-step { display: inline-flex; }
+
+  .approval-card { flex-direction: column; align-items: stretch; }
+  .approval-actions { width: 100%; flex-direction: column; }
+  .approval-actions button { width: 100%; min-height: 44px; }
+
+  .feed-item, .feed-tool, .feed-item.response { overflow-wrap: anywhere; word-break: break-word; }
+}

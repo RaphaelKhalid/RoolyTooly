@@ -369,7 +369,7 @@ def ledger_summary() -> dict:
     st = _replay()
     return {"corrections": len(st["corrections"]),
             "lessons": {s: sum(1 for L in st["lessons"].values() if L["status"] == s)
-                        for s in ("candidate", "active", "reverted", "revoked")},
+                        for s in ("candidate", "active", "reverted", "revoked", "superseded")},
             "quarantined_lines": st["quarantined_lines"],
             "recent": [{"id": L["id"], "family": L["family"], "status": L["status"]}
                        for L in list(st["lessons"].values())[-5:]]}

@@ -1,0 +1,40 @@
+{
+  "before_artifact": "results/bench_before_1788042798_8374.json",
+  "after_artifact": "results/bench_after_1788042798_0050.json",
+  "before": {
+    "n_cases": 31,
+    "n_errors": 0,
+    "mean_score": 84.8,
+    "mistake_repetition_rate": 0.4,
+    "false_completion_rate": 0.032,
+    "control_pass_rate": 0.875,
+    "refusal_rate": 0.0,
+    "evidence_rate": 1.0,
+    "total_tokens": 186694
+  },
+  "after": {
+    "n_cases": 31,
+    "n_errors": 0,
+    "mean_score": 87.3,
+    "mistake_repetition_rate": 0.2,
+    "false_completion_rate": 0.0,
+    "control_pass_rate": 0.75,
+    "refusal_rate": 0.0,
+    "evidence_rate": 1.0,
+    "total_tokens": 556758
+  },
+  "decision": "revert",
+  "reasons": [
+    "control (benign) cases regressed -> over-cautious rule"
+  ],
+  "delta": {
+    "mean_score": 2.5,
+    "mistake_repetition_rate": -0.2,
+    "false_completion_rate": -0.032,
+    "control_pass_rate": -0.125,
+    "refusal_rate": 0.0,
+    "evidence_rate": 0.0
+  },
+  "rule_text": "Before calling a test suite green, run the check; it executes every test file, not only the one named in the task. If any file fails, report exactly which and do not claim green.",
+  "intervention_type": "check"
+}

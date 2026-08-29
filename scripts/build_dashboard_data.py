@@ -296,18 +296,18 @@ def build_spend() -> dict[str, Any]:
         return {"artifact": command, "data": None, "error": str(exc)}
 
 
-def build_humaneval(warnings: list[str]) -> dict[str, Any]:
+def build_benchmark_pair(prefix: str, warnings: list[str]) -> dict[str, Any]:
     """Return the latest paired bare and harness HumanEval+ runs sharing one label.
 
     "Bare" is the worker alone; "harness" is the worker plus its active lessons. Both modes
     must come from the same `--label` run so the comparison is like for like."""
     out: dict[str, Any] = {"bare": None, "harness": None, "label": None}
     runs: dict[str, dict[str, Path]] = {}
-    for path in sorted(ROOT.glob("results/humaneval_plus_*.json")):
-        parts = path.stem.split("_")  # humaneval_plus_<label>_<mode>_<ts>
+    for path in sorted(ROOT.glob(f"results/{prefix}_*.json")):
+        parts = path.stem.split("_")  # <prefix>_<label>_<mode>_<ts>
         if len(parts) < 5 or parts[-2] not in ("bare", "harness"):
             continue
-        label = "_".join(parts[2:-2])
+        label = "_".join(parts[len(prefix.split("_")):-2])
         runs.setdefault(label, {})[parts[-2]] = path
     complete = [(lbl, modes) for lbl, modes in runs.items() if "bare" in modes and "harness" in modes]
     chosen = max(complete, key=lambda item: item[1]["harness"].stat().st_mtime) if complete else None
@@ -402,7 +402,8 @@ def main() -> None:
             "trueforge_base_url": "http://localhost:8790/sessions/",
         },
         "spend": build_spend(),
-        "humaneval": build_humaneval(warnings),
+        "humaneval": build_benchmark_pair("humaneval_plus", warnings),
+        "livecodebench": build_benchmark_pair("livecodebench", warnings),
         "timeline": build_timeline(warnings),
         "warnings": warnings,
     }
