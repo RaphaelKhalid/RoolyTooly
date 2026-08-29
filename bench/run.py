@@ -105,31 +105,33 @@ def warm_sandbox(sid: str, tries: int = 2) -> bool:
 
 
 def run_one(case: dict, manifest: dict, timeout_s: float = 420, retries: int = 2) -> dict:
+    """One case in a fresh session. Every step of an attempt (create session, warm-up, task turn, event
+    fetch) is inside the retry loop: transport/provider failures become retries, then a structured error —
+    never an exception that aborts the whole suite."""
     t0 = time.time()
     attempts = 0
+    sid, turn, events, err = None, None, [], None
     while True:
         attempts += 1
-        sid = tf.create_session(spec=manifest)
-        err = None
-        turn = None
-        if not warm_sandbox(sid):
-            if attempts <= retries:
-                print(f"  [env-err] {case['id']} attempt {attempts}: broken sandbox at warm-up -> new session", flush=True)
-                continue
+        sid, turn, events, err = None, None, [], None
         try:
-            turn = tf.run_turn(sid, case["task"], timeout_s=timeout_s)
+            sid = tf.create_session(spec=manifest)
+            if not warm_sandbox(sid):
+                err = "EnvironmentError: broken sandbox at warm-up"
+            else:
+                turn = tf.run_turn(sid, case["task"], timeout_s=timeout_s)
+                events = [e for e in tf.session_events(sid) if e.get("_turn_id") == turn["id"]]
+                env = env_error(events)
+                if env:
+                    err = f"EnvironmentError: {env}"
         except Exception as e:  # noqa: BLE001
             err = f"{type(e).__name__}: {e}"
-        events = tf.session_events(sid)
-        if turn:  # grade only the task turn, not the warm-up turn(s)
-            events = [e for e in events if e.get("_turn_id") == turn["id"]]
         purge_sandboxes(only_idle=True)
-        env = env_error(events)
-        if env and attempts <= retries:
-            print(f"  [env-err] {case['id']} attempt {attempts}: {env[:80]} -> retrying", flush=True)
+        retryable = err is not None and ("EnvironmentError" in err or "TrueForgeError" in err
+                                         or "URLError" in err or "timed out" in err)
+        if retryable and attempts <= retries:
+            print(f"  [env-err] {case['id']} attempt {attempts}: {err[:90]} -> retrying", flush=True)
             continue
-        if env:
-            err = f"EnvironmentError: {env}"
         break
     result = check_case(case, events)
     result["attempts"] = attempts
