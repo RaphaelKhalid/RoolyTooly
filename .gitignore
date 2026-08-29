@@ -1,0 +1,11 @@
+node_modules/
+.env
+.env.*
+*.log
+.DS_Store
+dist/
+.vercel/
+__pycache__/
+.venv/
+# private working notes
+hackathon-kickoff-prompt.md
