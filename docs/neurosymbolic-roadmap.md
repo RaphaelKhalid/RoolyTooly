@@ -45,7 +45,8 @@ The current system has strong symbolic foundations:
 - [`mcp_servers/eval_server.py`](../mcp_servers/eval_server.py) applies deterministic regression and
   keep/revert policy, including coverage and control-regression gates.
 - [`mcp_servers/ledger_server.py`](../mcp_servers/ledger_server.py) is append-only, reconstructs state by
-  replay, and approval-gates promotion and revocation.
+  replay, and exposes promotion and revocation transitions. Promotion is approval-gated in the current root
+  manifest; revocation is marked destructive but is not yet listed in that manifest's approval policy.
 - [`autoresearch/sweep.py`](../autoresearch/sweep.py) searches bounded intervention types and keeps only a
   benchmark winner.
 - [`manifests/immune_root.json`](../manifests/immune_root.json) separates the neural compiler, falsifier, and
@@ -282,6 +283,8 @@ coverage is insufficient instead of declaring a family closed.
 
 ### PR E — lifecycle and demo surface
 
+- Add `revoke_lesson` to the root manifest's explicit approval policy and test that TrueForge pauses before
+  the status transition is appended.
 - Propagate promote/revoke/supersede transitions to skills, Qodo mappings, runtime selection, and timeline
   evaluation.
 - Show the fact chain and proof certificate in the dashboard: claim -> required evidence -> observed fact ->
