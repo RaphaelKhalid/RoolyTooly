@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   createSession,
   startTurn,
@@ -13,13 +13,112 @@ import {
   type TurnStatus,
 } from "./tf";
 
-const PRESETS = [
-  "Run the worker on M05_hollow_report_01.",
-  "Correction: the printed summary is a cached value; report.json says null. Never report a value you haven't read from the artifact. Compile this into a lesson and take it through transfer and the PR.",
+const PRESETS: { label: string; text: string }[] = [
+  { label: "Easy trap: hollow report", text: "Run the worker on M05_hollow_report_01." },
+  { label: "Hard trap: stale report", text: "Run the worker on M09_stale_report_train." },
+  { label: "Hard contest problem (hidden tests)", text: "Run the worker on LCB_DEMO_1." },
+  {
+    label: "Correct it once → compile a lesson",
+    text: "Correction: the printed summary is a cached value; report.json says null. Never report a value you haven't read from the artifact. Compile this into a lesson and take it through transfer and the PR.",
+  },
 ];
 
 const shortId = (id: string) => (id.length > 8 ? id.slice(0, 8) : id);
 const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+
+type PipelineStepId =
+  | "worker"
+  | "trace"
+  | "correction"
+  | "compile"
+  | "falsify"
+  | "regression"
+  | "benchmark"
+  | "approval"
+  | "promote"
+  | "skill"
+  | "transfer"
+  | "pr";
+
+const PIPELINE_STEPS: { id: PipelineStepId; label: string; caption: string }[] = [
+  { id: "worker", label: "worker run", caption: "Worker run: the agent attempts the task inside the sandbox." },
+  { id: "trace", label: "trace check", caption: "Trace check: verifying the agent actually read the artifact before reporting on it." },
+  { id: "correction", label: "correction", caption: "Correction: a human points out the mistake in plain language." },
+  { id: "compile", label: "compile", caption: "Compile: the lesson-compiler subagent turns the correction into a candidate rule." },
+  { id: "falsify", label: "falsify", caption: "Falsify: the falsifier subagent tries to break the candidate rule before it's trusted." },
+  { id: "regression", label: "regression", caption: "Regression: the old agent must fail this test and the new one must pass it." },
+  { id: "benchmark", label: "benchmark", caption: "Benchmark: the rule is scored across the full case set, not just the one it came from." },
+  { id: "approval", label: "approval", caption: "Approval: a human signs off before anything ships." },
+  { id: "promote", label: "promote", caption: "Promote: the rule graduates from candidate to an active lesson." },
+  { id: "skill", label: "skill + Qodo rule", caption: "Skill + Qodo rule: the lesson is written back as a reusable skill and a Qodo rule." },
+  { id: "transfer", label: "transfer", caption: "Transfer: a fresh agent on a hidden task is checked for the lesson without ever seeing the correction." },
+  { id: "pr", label: "PR", caption: "PR: the change opens a pull request for review." },
+];
+
+function stepForToolCall(name?: string, args?: string): PipelineStepId | null {
+  if (!name) return null;
+  switch (name) {
+    case "run_worker":
+      return "worker";
+    case "record_correction":
+      return "correction";
+    case "create_sub_agent": {
+      const a = (args ?? "").toLowerCase();
+      if (a.includes("lesson-compiler")) return "compile";
+      if (a.includes("falsifier")) return "falsify";
+      return null;
+    }
+    case "run_regression":
+    case "run_sweep":
+      return "regression";
+    case "run_benchmark":
+      return "benchmark";
+    case "promote_lesson":
+      return "promote";
+    case "push_files":
+    case "register_skill":
+      return "skill";
+    case "run_transfer":
+      return "transfer";
+    case "create_pull_request":
+      return "pr";
+    default:
+      return null;
+  }
+}
+
+function derivePipeline(events: EventRow[]): { active: PipelineStepId | null; done: Set<PipelineStepId> } {
+  const done = new Set<PipelineStepId>();
+  let active: PipelineStepId | null = null;
+  let lastCallStep: PipelineStepId | null = null;
+
+  const advance = (step: PipelineStepId) => {
+    if (active && active !== step) done.add(active);
+    active = step;
+  };
+
+  for (const row of events) {
+    const ev = row.event;
+    if (ev.type === "model.message") {
+      for (const tc of ev.tool_calls ?? []) {
+        const step = stepForToolCall(tc.function?.name, tc.function?.arguments);
+        if (step) {
+          advance(step);
+          lastCallStep = step;
+        }
+      }
+    } else if (ev.type === "tool.response") {
+      if (lastCallStep === "worker") {
+        advance("trace");
+        lastCallStep = null;
+      }
+    } else if (ev.type === "tool.approval_required") {
+      advance("approval");
+    }
+  }
+
+  return { active, done };
+}
 
 function Harness() {
   const [password, setPassword] = useState(() => getStoredPassword());
@@ -158,14 +257,16 @@ function Harness() {
           />
           <div className="harness-presets">
             {PRESETS.map((p) => (
-              <button key={p} onClick={() => void send(p)} disabled={busy || running} title={p}>
-                {truncate(p, 60)}
+              <button key={p.label} onClick={() => void send(p.text)} disabled={busy || running} title={p.text}>
+                {p.label}
               </button>
             ))}
             <button onClick={() => void send(message)} disabled={busy || running || !message.trim()}>Send</button>
           </div>
         </div>
       )}
+
+      <PipelineStrip events={events} />
 
       {requiredActions
         .filter((a) => a.type === "tool.approval_required")
@@ -189,6 +290,27 @@ function Harness() {
         ))}
       </div>
     </section>
+  );
+}
+
+function PipelineStrip({ events }: { events: EventRow[] }) {
+  const { active, done } = useMemo(() => derivePipeline(events), [events]);
+  const activeStep = PIPELINE_STEPS.find((s) => s.id === active);
+
+  return (
+    <div className="pipeline">
+      <div className="pipeline-strip">
+        {PIPELINE_STEPS.map((s) => {
+          const state = s.id === active ? "active" : done.has(s.id) ? "done" : "idle";
+          return (
+            <div className="pipeline-step" key={s.id}>
+              <span className={`pipeline-pill ${state}`}>{s.label}</span>
+            </div>
+          );
+        })}
+      </div>
+      <p className="pipeline-caption">{activeStep ? activeStep.caption : "Idle — waiting for a run."}</p>
+    </div>
   );
 }
 

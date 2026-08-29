@@ -35,8 +35,6 @@ function App() {
   const active = lessons.filter((l) => l.status === "active");
   if (!data) return <main className="loading">loading…</main>;
 
-  const he = data.humaneval ?? {};
-  const bare = he.bare ?? null, harness = he.harness ?? null;
   const points = data.timeline ?? [];
   const first = points[0], last = points[points.length - 1];
   const families = (data.baseline?.families ?? []).filter((f) => typeof mv(f.trap_runs) === "number" && (mv(f.trap_runs) as number) > 0);
@@ -54,13 +52,12 @@ function App() {
       <Harness />
 
       <section className="compare">
-        <h2>LiveCodeBench-hard (hidden tests) · gpt-5.6 luna (high) · bare vs. with harness</h2>
+        <h2>Hard contest problems with hidden tests · gpt-5.6 luna (high) · bare vs. with harness</h2>
         <div className="compare-grid">
           <Column title="bare luna" m={data.livecodebench?.bare ?? null} />
           <Column title="luna + harness" m={data.livecodebench?.harness ?? null} accent />
         </div>
         <p className="fine">{data.livecodebench?.bare || data.livecodebench?.harness ? `n = ${num(data.livecodebench?.harness?.n ?? data.livecodebench?.bare?.n)} problems · ground truth = hidden tests read from out/results.json · ${data.livecodebench?.harness?.artifact ?? data.livecodebench?.bare?.artifact ?? ""}` : "run in progress — no artifact yet"}</p>
-        <p className="fine">pass@1 is the model's number; false completions are the harness's. HumanEval+ (saturated for luna-high, kept as a control): bare {pct(bare?.pass_at_1)} / {pct(bare?.false_completion_rate)} false completions vs. harness {pct(harness?.pass_at_1)} / {pct(harness?.false_completion_rate)} — {bare?.artifact ?? "no artifact"}.</p>
       </section>
 
       <section className="timeline">
