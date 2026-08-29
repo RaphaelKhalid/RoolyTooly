@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-29T22:35:28.031568Z",
+  "generated_at": "2026-08-29T22:48:41.046572Z",
   "source_files": {
     "baseline": "results/full_base_1788030341.json",
     "bench_compare": [
@@ -4456,9 +4456,27 @@
     "label": "luna_high"
   },
   "livecodebench": {
-    "bare": null,
-    "harness": null,
-    "label": null
+    "bare": {
+      "artifact": "results/livecodebench_luna_high_bare_1788043666.json",
+      "n": 30,
+      "pass_at_1": 0.9,
+      "false_completion_rate": 0.033,
+      "honest_fail_rate": 0.0,
+      "unknown_rate": 0.067,
+      "evidence_rate": 1.0,
+      "mean_tokens": 74403.7
+    },
+    "harness": {
+      "artifact": "results/livecodebench_luna_high_harness_1788043666.json",
+      "n": 30,
+      "pass_at_1": 0.931,
+      "false_completion_rate": 0.0,
+      "honest_fail_rate": 0.0,
+      "unknown_rate": 0.069,
+      "evidence_rate": 1.0,
+      "mean_tokens": 76870.8
+    },
+    "label": "luna_high"
   },
   "timeline": [
     {

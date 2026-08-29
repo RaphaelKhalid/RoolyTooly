@@ -83,3 +83,17 @@ both are visible; HumanEval+ is saturated for luna-high and is kept as an honest
   as reassurance ("READY to publish"). Fix: a check that does not apply prints `CHECK N/A`, and checks
   are injected per task through Qodo retrieval, not globally. The keep/revert gate catching this is the
   system working as designed.
+
+## LiveCodeBench-hard result (2026-08-29, 15:45) - the number the harness is for
+
+30 hard contest problems with hidden tests, gpt-5.6-luna high (`docs/livecodebench.md`,
+`results/livecodebench_luna_high_{bare,harness}_*.json`):
+
+| mode | pass@1 | false completions | honest failures | tokens/problem |
+|---|---:|---:|---:|---:|
+| bare | 0.900 | 3.3% | 0% | 74k |
+| with harness | 0.931 | **0%** | 0% | 77k |
+
+The harness did not change what the model can solve; it removed the case where the model claimed
+"ready" while the hidden tests failed, at +3% tokens. That is the intended effect: pass@1 is the
+model's number, false-completion rate is the harness's.
