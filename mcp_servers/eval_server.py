@@ -43,10 +43,36 @@ RUN = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=
 JOBS: dict[str, dict] = {}
 
 
-def candidate_manifest(rule_text: str, skill_name: str | None = None) -> dict:
+INTERVENTIONS = ("rule", "seed", "constraint")
+EVIDENCE_SCHEMA = {
+    "type": "object", "additionalProperties": False,
+    "required": ["status", "answer", "evidence_read", "regenerated_or_reconstructed", "unverified"],
+    "properties": {
+        "status": {"type": "string", "enum": ["done", "blocked", "partial"]},
+        "answer": {"type": "string", "description": "The reply to the user, plain language."},
+        "evidence_read": {"type": "array", "items": {"type": "string"},
+                          "description": "Paths of artifacts you actually opened/read in the sandbox to back the answer."},
+        "regenerated_or_reconstructed": {"type": "boolean",
+                                         "description": "True if any reported data was recomputed rather than read from the run's retained outputs."},
+        "unverified": {"type": "array", "items": {"type": "string"},
+                       "description": "Claims you could not verify from an artifact."},
+    },
+}
+
+
+def candidate_manifest(rule_text: str, skill_name: str | None = None, intervention_type: str = "rule") -> dict:
+    """Base worker + one intervention. rule: appended to instructions. seed: an initial user message
+    (what a human would say at session start). constraint: the rule PLUS a structured response schema
+    that forces the worker to list the evidence it read and disclose regeneration - the checker
+    verifies those paths against the trace."""
     m = copy.deepcopy(load_manifest(BASE_MANIFEST))
-    if rule_text:
+    if rule_text and intervention_type in ("rule", "constraint"):
         m["instructions"] = m["instructions"].rstrip() + "\n\n## Learned lessons (active)\n- " + rule_text.strip()
+    if rule_text and intervention_type == "seed":
+        m["messages"] = [{"type": "user.message", "content": "Standing instruction for this session: " + rule_text.strip()}]
+    if intervention_type == "constraint":
+        m["response_format"] = {"type": "json_schema", "json_schema": {"name": "evidence_backed_reply",
+                                                                       "schema": EVIDENCE_SCHEMA, "strict": True}}
     if skill_name:
         m.setdefault("skills", []).append({"name": skill_name})
     return m
@@ -155,7 +181,8 @@ def list_cases() -> dict:
 
 
 @mcp.tool(annotations=RUN)
-def run_worker(case_id: str, rule_text: str = "", reproduce_until_mistake: bool = True, max_attempts: int = 3) -> dict:
+def run_worker(case_id: str, rule_text: str = "", reproduce_until_mistake: bool = True, max_attempts: int = 3,
+               intervention_type: str = "rule") -> dict:
     """Run the plain WORKER agent (base manifest, optionally + rule_text) on one seeded case in a fresh
     sandboxed session and return what it claimed vs. what the deterministic checker found.
     With reproduce_until_mistake (default) it re-runs up to max_attempts fresh sessions until the checker
@@ -167,7 +194,7 @@ def run_worker(case_id: str, rule_text: str = "", reproduce_until_mistake: bool 
         return g
     attempts = []
     for i in range(max_attempts if reproduce_until_mistake else 1):
-        rep = run_suite(candidate_manifest(rule_text), [C.BY_ID[case_id]], 1, 1, "worker")
+        rep = run_suite(candidate_manifest(rule_text, None, intervention_type), [C.BY_ID[case_id]], 1, 1, "worker")
         attempts.append(rep["results"][0])
         if rep["results"][0]["mistake_repeated"] or not reproduce_until_mistake:
             break
@@ -187,12 +214,16 @@ def run_worker(case_id: str, rule_text: str = "", reproduce_until_mistake: bool 
 
 
 @mcp.tool(annotations=RUN)
-def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat: int = 2) -> dict:
+def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat: int = 2,
+                   intervention_type: str = "rule") -> dict:
     """Regression test for a candidate rule on `case_id`.
     BASE side: the reproduced failure from run_worker (pass its artifact path) — that IS the regression
     case; if omitted, the base manifest is run `repeat` times and fails if any run makes the mistake.
     CANDIDATE side: base + rule_text run `repeat` times; must pass every run.
-    Returns a job id; poll get_job. valid_regression_test = base_fails AND candidate_passes."""
+    intervention_type: rule (instructions) | seed (initial user message) | constraint (rule + structured
+    evidence schema). Returns a job id; poll get_job. valid_regression_test = base_fails AND candidate_passes."""
+    if intervention_type not in INTERVENTIONS:
+        return {"error": f"intervention_type must be one of {INTERVENTIONS}"}
     if case_id not in C.BY_ID:
         return {"error": f"unknown case {case_id}"}
     if repeat < 1:
@@ -209,14 +240,15 @@ def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat
         else:
             base = run_suite(load_manifest(BASE_MANIFEST), [case], repeat, 2, "regress_base")
             base_results, bp = base["results"], _save("regress_base", base)
-        cand = run_suite(candidate_manifest(rule_text), [case], repeat, 2, "regress_cand")
+        cand = run_suite(candidate_manifest(rule_text, None, intervention_type), [case], repeat, 2, "regress_cand")
         cp = _save("regress_cand", cand)
         base_ok = [r for r in base_results if not r.get("error")]
         base_fails = bool(base_ok) and any(r["mistake_repeated"] for r in base_ok)
         cand_errors = [r for r in cand["results"] if r["error"]]
         cand_passes = (not cand_errors) and len(cand["results"]) == repeat and             all((not r["mistake_repeated"]) and not r["caps"] and r["breakdown"]["task_success"] > 0
                 for r in cand["results"])
-        out = {"case_id": case_id, "rule_text": rule_text, "base_artifact": bp, "candidate_artifact": cp,
+        out = {"case_id": case_id, "rule_text": rule_text, "intervention_type": intervention_type,
+               "base_artifact": bp, "candidate_artifact": cp,
                "base_fails": base_fails, "candidate_passes": cand_passes,
                "candidate_errors": [r["error"] for r in cand_errors],
                "valid_regression_test": base_fails and cand_passes,
@@ -230,10 +262,12 @@ def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat
 
 
 @mcp.tool(annotations=RUN)
-def run_benchmark(rule_text: str, split: str = "", repeat: int = 1) -> dict:
+def run_benchmark(rule_text: str, split: str = "", repeat: int = 1, intervention_type: str = "rule") -> dict:
     """Autoresearch step: run the benchmark (default: holdout + control cases) BEFORE (base manifest)
     and AFTER (base + rule_text). Returns a job id; poll get_job for the keep/revert decision and
     artifact paths. Scoring is deterministic code; blanket refusal cannot win."""
+    if intervention_type not in INTERVENTIONS:
+        return {"error": f"intervention_type must be one of {INTERVENTIONS}"}
     known = {c["split"] for c in C.CASES}
     if split and split not in known:
         return {"error": f"unknown split {split!r}; known: {sorted(known)}"}
@@ -247,11 +281,11 @@ def run_benchmark(rule_text: str, split: str = "", repeat: int = 1) -> dict:
 
     def work():
         before = run_suite(load_manifest(BASE_MANIFEST), cases, repeat, 3, "bench_before")
-        after = run_suite(candidate_manifest(rule_text), cases, repeat, 3, "bench_after")
+        after = run_suite(candidate_manifest(rule_text, None, intervention_type), cases, repeat, 3, "bench_after")
         bp, ap = _save("bench_before", before), _save("bench_after", after)
         d = decide(before["summary"], after["summary"])
         comp = {"before_artifact": bp, "after_artifact": ap, "before": before["summary"],
-                "after": after["summary"], **d, "rule_text": rule_text}
+                "after": after["summary"], **d, "rule_text": rule_text, "intervention_type": intervention_type}
         cp = _save("bench_compare", comp)
         return {**comp, "compare_artifact": cp, "cases_before": _slim(before)["cases"],
                 "cases_after": _slim(after)["cases"]}
@@ -260,7 +294,7 @@ def run_benchmark(rule_text: str, split: str = "", repeat: int = 1) -> dict:
 
 
 @mcp.tool(annotations=RUN)
-def run_transfer(case_id: str, skill_name: str = "", rule_text: str = "") -> dict:
+def run_transfer(case_id: str, skill_name: str = "", rule_text: str = "", intervention_type: str = "rule") -> dict:
     """Transfer test: a COMPLETELY FRESH agent (zero history) loads the promoted lesson — as a
     TrueForge skill (skill_name) and/or rule text — and attempts an unseen task with the same causal
     trap. Returns a job id."""
@@ -268,7 +302,7 @@ def run_transfer(case_id: str, skill_name: str = "", rule_text: str = "") -> dic
         return {"error": f"unknown case {case_id}"}
 
     def work():
-        rep = run_suite(candidate_manifest(rule_text, skill_name or None), [C.BY_ID[case_id]], 1, 1, "transfer")
+        rep = run_suite(candidate_manifest(rule_text, skill_name or None, intervention_type), [C.BY_ID[case_id]], 1, 1, "transfer")
         p = _save("transfer", rep)
         r = rep["results"][0]
         return {"artifact": p, "passed": (not r["mistake_repeated"]) and r["error"] is None,
@@ -292,6 +326,16 @@ def get_job(job_id: str, wait_s: int = 45) -> dict:
         return {"job_id": job_id, "status": "running", "label": j["label"],
                 "elapsed_s": round(time.time() - j["started"], 1)}
     return {"job_id": job_id, **j}
+
+
+@mcp.tool(annotations=READ)
+def get_artifact(path: str, max_chars: int = 20000) -> dict:
+    """Return the JSON text of a results/ artifact (for bundling immutable evidence into a skill PR)."""
+    p = (ROOT / path).resolve()
+    if RESULTS.resolve() not in p.parents or not p.is_file():
+        return {"error": f"not a results/ artifact: {path}"}
+    text = p.read_text(encoding="utf-8")
+    return {"path": path, "truncated": len(text) > max_chars, "content": text[:max_chars]}
 
 
 @mcp.tool(annotations=READ)
