@@ -296,6 +296,42 @@ def build_spend() -> dict[str, Any]:
         return {"artifact": command, "data": None, "error": str(exc)}
 
 
+def build_humaneval(warnings: list[str]) -> dict[str, Any]:
+    """HumanEval+ comparison: latest bare vs harness artifacts, numbers read from files only."""
+    out: dict[str, Any] = {"bare": None, "harness": None}
+    for mode in ("bare", "harness"):
+        path = latest(f"results/humaneval_plus_*_{mode}_*.json")
+        if not path:
+            continue
+        obj, error = read_json(path)
+        if error or not isinstance(obj, dict):
+            warnings.append(error or f"{path.name}: not an object")
+            continue
+        summary = obj.get("summary") if isinstance(obj.get("summary"), dict) else obj
+        out[mode] = {"artifact": artifact_name(path), "n": summary.get("n") or summary.get("n_cases"),
+                     "pass_at_1": summary.get("pass_at_1"), "false_completion_rate": summary.get("false_completion_rate"),
+                     "honest_fail_rate": summary.get("honest_fail_rate"), "unknown_rate": summary.get("unknown_rate"),
+                     "evidence_rate": summary.get("evidence_rate"), "mean_tokens": summary.get("mean_tokens")}
+    return out
+
+
+def build_timeline(warnings: list[str]) -> list[dict[str, Any]]:
+    """Self-improvement timeline points, one per results/timeline_*.json."""
+    points: list[dict[str, Any]] = []
+    for path in sorted(ROOT.glob("results/timeline_*.json")):
+        obj, error = read_json(path)
+        if error or not isinstance(obj, dict):
+            warnings.append(error or f"{path.name}: not an object")
+            continue
+        summary = obj.get("summary") or {}
+        points.append({"artifact": artifact_name(path), "label": obj.get("label"), "ran_at": obj.get("ran_at"),
+                       "n_active_lessons": obj.get("n_active_lessons"), "n_cases": summary.get("n_cases"),
+                       "mean_score": summary.get("mean_score"), "mistake_repetition_rate": summary.get("mistake_repetition_rate"),
+                       "false_completion_rate": summary.get("false_completion_rate"), "control_pass_rate": summary.get("control_pass_rate"),
+                       "per_family": {k: v.get("repetition_rate") for k, v in (obj.get("per_family") or {}).items() if isinstance(v, dict)}})
+    return points
+
+
 def main() -> None:
     warnings: list[str] = []
     ledger_path = ROOT / "ledger" / "ledger.jsonl"
@@ -352,6 +388,8 @@ def main() -> None:
             "trueforge_base_url": "http://localhost:8790/sessions/",
         },
         "spend": build_spend(),
+        "humaneval": build_humaneval(warnings),
+        "timeline": build_timeline(warnings),
         "warnings": warnings,
     }
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
