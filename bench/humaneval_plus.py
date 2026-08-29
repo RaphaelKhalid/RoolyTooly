@@ -1,6 +1,6 @@
-"""Real (unseeded-outcome) HumanEval+ benchmark cases -- family M03, split "holdout".
+"""Real HumanEval+ benchmark cases the worker must solve, not seeded bug fixtures.
 
-Unlike the hand-made fixtures in bench/cases_humaneval.py (a fixed buggy implementation with a
+Family M03, split "holdout". Unlike the hand-made fixtures in bench/cases_humaneval.py (a fixed buggy implementation with a
 known-in-advance mistake), every case here is a REAL, unmodified HumanEval problem and the worker
 must actually WRITE the implementation. We genuinely do not know ahead of time whether a given
 worker will pass it, so `expected` is "benchmark" rather than "blocked"/"success" -- there is no
@@ -135,7 +135,9 @@ def _safe_call(fn, args: list) -> tuple[bool, Any]:
 
 
 def _bad_value(v: Any) -> bool:
-    """NaN/inf (and containers of them) can't round-trip through repr() into a literal that
+    """True if a value (or something inside it) is NaN/infinite, which breaks repr().
+
+    NaN/inf (and containers of them) can't round-trip through repr() into a literal that
     re-parses to an equal value via our _eq() helper, so such cases are skipped."""
     if isinstance(v, float):
         return v != v or v in (float("inf"), float("-inf"))
@@ -147,9 +149,11 @@ def _bad_value(v: Any) -> bool:
 
 
 def _safe_repr_len(v: Any, cap: int) -> bool:
-    """True if repr(v) exists and is under `cap` chars. Guards against pathological values -- e.g.
-    a handful of HumanEval problems (large fibonacci/factorial-style tasks) produce huge ints that
-    exceed Python's int -> str conversion digit limit and raise on a bare repr()."""
+    """True if repr(v) exists and fits under `cap` characters, for embedding safely.
+
+    Guards against pathological values -- e.g. a handful of HumanEval problems (large
+    fibonacci/factorial-style tasks) produce huge ints that exceed Python's int -> str
+    conversion digit limit and raise on a bare repr()."""
     try:
         return len(repr(v)) <= cap
     except Exception:  # noqa: BLE001
@@ -160,8 +164,10 @@ def _safe_repr_len(v: Any, cap: int) -> bool:
 
 
 def _pick_delim(base: str, *contents: str) -> str:
-    """A heredoc terminator must be alone on its own line (no leading whitespace, since we always
-    use `<<'DELIM'` -- never `<<-`). Pick `base`, or `base1`, `base2`, ... if any generated line
+    """Pick a heredoc terminator that does not collide with any given content line.
+
+    A heredoc terminator must be alone on its own line (no leading whitespace, since we always
+    use `<<'DELIM'` -- never `<<-`). Picks `base`, or `base1`, `base2`, ... if any generated line
     happens to equal it exactly."""
     lines: set[str] = set()
     for c in contents:
@@ -347,7 +353,7 @@ def _build_case(row: dict, seed: int) -> dict | None:
 
 
 def make_cases(n: int, seed: int = 0) -> list[dict]:
-    """n deterministic (seeded) HumanEval+ cases in the bench/cases.py schema.
+    """Return n deterministic (seeded) HumanEval+ cases in the bench/cases.py schema.
 
     Selection is a seeded shuffle of all eligible task_ids (natural HumanEval/<k> order, minus
     EXCLUDE_ENTRY_POINTS) truncated to n, so the same (n, seed) always returns the same set of
