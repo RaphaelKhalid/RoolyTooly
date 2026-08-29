@@ -431,6 +431,25 @@ def get_job(job_id: str, wait_s: int = 45) -> dict:
 LEDGER_LOG = ROOT / "ledger" / "ledger.jsonl"
 
 
+def _all_lessons() -> list[dict]:
+    """Every lesson record with its current status."""
+    lessons: dict[str, dict] = {}
+    if not LEDGER_LOG.exists():
+        return []
+    for line in LEDGER_LOG.read_text(encoding="utf-8").splitlines():
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(r, dict):
+            continue
+        if r.get("kind") == "lesson":
+            lessons[r["id"]] = {**r, "status": "candidate"}
+        elif r.get("kind") == "status" and r.get("lesson_id") in lessons:
+            lessons[r["lesson_id"]]["status"] = r.get("status")
+    return list(lessons.values())
+
+
 def active_lessons() -> list[dict]:
     """Promoted lessons, replayed from the ledger file.
 
@@ -504,16 +523,34 @@ def harness_manifest(lessons: list[dict] | None = None, case_id: str | None = No
                           + "\n".join(f"- {t.strip()}" for t in seeds)}]
     if any(L.get("intervention_type") == "constraint" for L in lessons):
         m["response_format"] = {"type": "json_schema", "json_schema": {"name": "evidence_backed_reply", "schema": EVIDENCE_SCHEMA, "strict": True}}
+    checks = [L for L in lessons if L.get("intervention_type") == "check" and _check_name(L)]
+    if checks:
+        # one executable verifier per session (the first selected check); its rule text is in `rules` already
+        L = checks[0]
+        m["messages"] = [{"type": "user.message", "content": check_seed_message(L["rule_text"], check_script_text(_check_name(L)))}]
+        m["instructions"] = m["instructions"].rstrip() + "\n\n## Mandatory check\nRun /work/.rooly/check.py before your final reply and quote its CHECK line."
     return m
 
 
+def _check_name(L: dict) -> str:
+    """Name under bench/checks/ carried by a check lesson (explicit field or in its preflight text)."""
+    import re as _re
+    if L.get("check_script"):
+        return str(L["check_script"])
+    m = _re.search(r"bench/checks/([A-Za-z0-9_]+)\.py", str(L.get("preflight_check", "")))
+    return m.group(1) if m else ""
+
+
 @mcp.tool(annotations=RUN)
-def run_timeline_point(label: str = "", split: str = "", repeat: int = 1) -> dict:
+def run_timeline_point(label: str = "", split: str = "", repeat: int = 1, lesson_ids: list[str] | None = None) -> dict:
     """Score the CURRENT harness (worker model + all active lessons) on the benchmark.
 
     Appends a point
     to the improvement timeline (results/timeline_*.json). Default: every non-train case. Returns a job id."""
     lessons = active_lessons()
+    if lesson_ids is not None:  # controlled experiment: score an explicit lesson set, active or not
+        allowed = set(lesson_ids)
+        lessons = [L for L in _all_lessons() if L["id"] in allowed]
     cases = C.select(split) if split else [c for c in C.CASES if c["split"] != "train"]
     if not cases:
         return {"error": "no cases selected"}

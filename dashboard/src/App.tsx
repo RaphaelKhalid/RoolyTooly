@@ -33,85 +33,84 @@ function App() {
   }, []);
   const lessons = useMemo(() => data?.ledger?.lessons ?? [], [data]);
   const active = lessons.filter((l) => l.status === "active");
-  if (!data) return <main className="loading">loading…</main>;
 
-  const points = data.timeline ?? [];
+  const points = data?.timeline ?? [];
   const first = points[0], last = points[points.length - 1];
-  const families = (data.baseline?.families ?? []).filter((f) => typeof mv(f.trap_runs) === "number" && (mv(f.trap_runs) as number) > 0);
+  const families = (data?.baseline?.families ?? []).filter((f) => typeof mv(f.trap_runs) === "number" && (mv(f.trap_runs) as number) > 0);
 
   return (
-    <main>
-      <header className="hero">
-        <div className="hero-inner">
-          <div className="brand">ROOLYTOOLY</div>
-          <h1>Correct it once.<br />It proves it won't repeat the mistake.</h1>
-          <p>A TrueForge agent that turns one correction into a tested, promoted skill. Every number below is read from a file in <code>results/</code>.</p>
-        </div>
-      </header>
-
+    <>
       <Harness />
 
-      <section className="compare">
-        <h2>Hard contest problems with hidden tests · gpt-5.6 luna (high) · bare vs. with harness</h2>
-        <div className="compare-grid">
-          <Column title="bare luna" m={data.livecodebench?.bare ?? null} />
-          <Column title="luna + harness" m={data.livecodebench?.harness ?? null} accent />
-        </div>
-        <p className="fine">{data.livecodebench?.bare || data.livecodebench?.harness ? `n = ${num(data.livecodebench?.harness?.n ?? data.livecodebench?.bare?.n)} problems · ground truth = hidden tests read from out/results.json · ${data.livecodebench?.harness?.artifact ?? data.livecodebench?.bare?.artifact ?? ""}` : "run in progress — no artifact yet"}</p>
-      </section>
+      <main className="evidence-wrap">
+        <div className="evidence">
+          <p className="evidence-label">Evidence</p>
 
-      <section className="timeline">
-        <h2>Self-improvement over the hackathon</h2>
-        {points.length ? (
-          <>
-            <Chart points={points} />
-            <div className="timeline-stats">
-              <Stat label="repetition rate" from={pct(first?.mistake_repetition_rate)} to={pct(last?.mistake_repetition_rate)} />
-              <Stat label="false completions" from={pct(first?.false_completion_rate)} to={pct(last?.false_completion_rate)} />
-              <Stat label="controls passing" from={pct(first?.control_pass_rate)} to={pct(last?.control_pass_rate)} />
-              <Stat label="promoted lessons" from={num(first?.n_active_lessons)} to={num(last?.n_active_lessons)} />
+          <section className="compare">
+            <h2>Hard contest problems with hidden tests · gpt-5.6 luna (high) · bare vs. with harness</h2>
+            <div className="compare-grid">
+              <Column title="bare luna" m={data?.livecodebench?.bare ?? null} />
+              <Column title="luna + harness" m={data?.livecodebench?.harness ?? null} accent />
             </div>
-            <p className="fine">{points.length} points · each is a full run of the agent-as-of-then on every non-train case · {points.map((p) => p.artifact).join(", ")}</p>
-          </>
-        ) : <p className="fine">no timeline artifacts yet</p>}
-      </section>
+            <p className="fine">{data?.livecodebench?.bare || data?.livecodebench?.harness ? `n = ${num(data?.livecodebench?.harness?.n ?? data?.livecodebench?.bare?.n)} problems · ground truth = hidden tests read from out/results.json · ${data?.livecodebench?.harness?.artifact ?? data?.livecodebench?.bare?.artifact ?? ""}` : "run in progress — no artifact yet"}</p>
+          </section>
 
-      <section className="three">
-        <div>
-          <h2>Where luna still slips</h2>
-          <table>
-            <thead><tr><th>family</th><th>traps</th><th>repeats</th><th>controls</th></tr></thead>
-            <tbody>{families.map((f) => <tr key={f.family}><td><b>{f.family}</b></td><td>{num(mv(f.trap_runs))}</td><td className={(mv(f.repetition_rate) as number) > 0 ? "bad" : "good"}>{pct(mv(f.repetition_rate))}</td><td>{typeof mv(f.controls_passed) === "string" ? String(mv(f.controls_passed)) : num(mv(f.controls_passed))}</td></tr>)}</tbody>
-          </table>
-          <p className="fine">{data.baseline?.artifact ?? ""}</p>
-        </div>
-        <div>
-          <h2>Lessons ({active.length} promoted / {lessons.length} tried)</h2>
-          {lessons.slice().reverse().slice(0, 6).map((l) => (
-            <div className={`lesson ${l.status}`} key={l.id}>
-              <div className="lesson-head"><span className="tag">{l.family}</span><span className="tag dim">{l.intervention_type}</span><span className={`state ${l.status}`}>{l.status}</span></div>
-              <p>{l.rule_text}</p>
+          <section className="timeline">
+            <h2>Self-improvement over the hackathon</h2>
+            {points.length ? (
+              <>
+                <Chart points={points} />
+                <div className="timeline-stats">
+                  <Stat label="repetition rate" from={pct(first?.mistake_repetition_rate)} to={pct(last?.mistake_repetition_rate)} />
+                  <Stat label="false completions" from={pct(first?.false_completion_rate)} to={pct(last?.false_completion_rate)} />
+                  <Stat label="controls passing" from={pct(first?.control_pass_rate)} to={pct(last?.control_pass_rate)} />
+                  <Stat label="promoted lessons" from={num(first?.n_active_lessons)} to={num(last?.n_active_lessons)} />
+                </div>
+                <p className="fine">{points.length} points · each is a full run of the agent-as-of-then on every non-train case · {points.map((p) => p.artifact).join(", ")}</p>
+              </>
+            ) : <p className="fine">no timeline artifacts yet</p>}
+          </section>
+
+          <section className="three">
+            <div>
+              <h2>Where luna still slips</h2>
+              <table>
+                <thead><tr><th>family</th><th>traps</th><th>repeats</th><th>controls</th></tr></thead>
+                <tbody>{families.map((f) => <tr key={f.family}><td><b>{f.family}</b></td><td>{num(mv(f.trap_runs))}</td><td className={(mv(f.repetition_rate) as number) > 0 ? "bad" : "good"}>{pct(mv(f.repetition_rate))}</td><td>{typeof mv(f.controls_passed) === "string" ? String(mv(f.controls_passed)) : num(mv(f.controls_passed))}</td></tr>)}</tbody>
+              </table>
+              <p className="fine">{data?.baseline?.artifact ?? ""}</p>
             </div>
-          ))}
-        </div>
-        <div>
-          <h2>In the wild</h2>
-          <p className="fine">{data.ledger?.observations?.length ?? 0} real reports mined with Bright Data</p>
-          <div className="counts">{(data.ledger?.observation_counts ?? []).slice(0, 8).map((c) => <span key={c.family}><b>{c.family}</b> {c.count}</span>)}</div>
-          {(data.ledger?.observations ?? []).slice(-3).reverse().map((o) => <blockquote key={o.id}>“{o.quote}” <a href={o.source_url} target="_blank" rel="noreferrer">source ↗</a></blockquote>)}
-        </div>
-      </section>
+            <div>
+              <h2>Lessons ({active.length} promoted / {lessons.length} tried)</h2>
+              {lessons.slice().reverse().slice(0, 6).map((l) => (
+                <div className={`lesson ${l.status}`} key={l.id}>
+                  <div className="lesson-head"><span className="tag">{l.family}</span><span className="tag dim">{l.intervention_type}</span><span className={`state ${l.status}`}>{l.status}</span></div>
+                  <p>{l.rule_text}</p>
+                </div>
+              ))}
+            </div>
+            <div>
+              <h2>In the wild</h2>
+              <p className="fine">{data?.ledger?.observations?.length ?? 0} real reports mined with Bright Data</p>
+              <div className="counts">{(data?.ledger?.observation_counts ?? []).slice(0, 8).map((c) => <span key={c.family}><b>{c.family}</b> {c.count}</span>)}</div>
+              {(data?.ledger?.observations ?? []).slice(-3).reverse().map((o) => <blockquote key={o.id}>“{o.quote}” <a href={o.source_url} target="_blank" rel="noreferrer">source ↗</a></blockquote>)}
+            </div>
+          </section>
 
-      {data.transfer?.result && (
-        <section className="transfer">
-          <h2>Fresh agent, hidden task, promoted skill loaded</h2>
-          <div className="transfer-row"><strong>{num(data.transfer.result.score)}</strong><p>“{data.transfer.result.final_message}”</p></div>
-          <p className="fine">{data.transfer.result.case_id} · {data.transfer.artifact}</p>
-        </section>
-      )}
+          {data?.transfer?.result && (
+            <section className="transfer">
+              <h2>Fresh agent, hidden task, promoted skill loaded</h2>
+              <div className="transfer-row"><strong>{num(data.transfer.result.score)}</strong><p>“{data.transfer.result.final_message}”</p></div>
+              <p className="fine">{data.transfer.result.case_id} · {data.transfer.artifact}</p>
+            </section>
+          )}
 
-      <footer>snapshot {data.generated_at} · spend ${num(data.spend?.data?.spent_usd)} of ${num(data.spend?.data?.cap_usd)} · <a href="https://github.com/RaphaelKhalid/RoolyTooly">github</a></footer>
-    </main>
+          {!data && <p className="fine">loading…</p>}
+        </div>
+
+        <footer>snapshot {data?.generated_at} · spend ${num(data?.spend?.data?.spent_usd)} of ${num(data?.spend?.data?.cap_usd)} · <a href="https://github.com/RaphaelKhalid/RoolyTooly">github</a></footer>
+      </main>
+    </>
   );
 }
 
