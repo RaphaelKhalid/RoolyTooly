@@ -1,4 +1,11 @@
 // Serverless proxy: browser -> this function -> private TrueForge tunnel.
+function safeParse(text: string): any {
+  try {
+    return JSON.parse(text);
+  } catch {
+    return {};
+  }
+}
 // Requires x-harness-password to match HARNESS_PASSWORD; forwards to TRUEFORGE_URL.
 export default async function handler(req: any, res: any) {
   res.setHeader("Cache-Control", "no-store");
@@ -27,9 +34,21 @@ export default async function handler(req: any, res: any) {
   const base = TRUEFORGE_URL.replace(/\/+$/, "");
   const url = `${base}/api/v1/${tail}${qs ? `?${qs}` : ""}`;
 
+  // Public-demo containment: only session routes are reachable (no settings, agents, connectors,
+  // sandbox file downloads), and every new session is forced onto the GitHub-less demo agent.
+  if (!/^sessions(\/[A-Za-z0-9_.-]+(\/(turns|events)(\/[A-Za-z0-9_.-]+(\/events)?)?)?)?$/.test(tail)) {
+    res.status(403).json({ error: "Route not exposed by the public demo proxy." });
+    return;
+  }
   const method: string = req.method ?? "GET";
   const hasBody = method !== "GET" && method !== "HEAD";
-  const body = hasBody ? (typeof req.body === "string" ? req.body : JSON.stringify(req.body ?? {})) : undefined;
+  let payload: any = hasBody ? (typeof req.body === "string" ? safeParse(req.body) : req.body ?? {}) : undefined;
+  if (method === "POST" && tail === "sessions") payload = { agent: { name: process.env.DEMO_AGENT || "roolytooly-demo" } };
+  if (method === "DELETE") {
+    res.status(403).json({ error: "Deletes are not exposed." });
+    return;
+  }
+  const body = hasBody ? JSON.stringify(payload ?? {}) : undefined;
 
   try {
     const upstream = await fetch(url, {
