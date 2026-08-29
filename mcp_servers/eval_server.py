@@ -59,6 +59,15 @@ def worker_model() -> dict:
 
 
 INTERVENTIONS = ("rule", "seed", "constraint")
+
+
+def validate_intervention_type(intervention_type: str) -> str:
+    """Validate an intervention before building a candidate manifest."""
+    if intervention_type not in INTERVENTIONS:
+        raise ValueError(f"intervention_type must be one of {INTERVENTIONS}")
+    return intervention_type
+
+
 EVIDENCE_SCHEMA = {
     "type": "object", "additionalProperties": False,
     "required": ["status", "answer", "evidence_read", "regenerated_or_reconstructed", "unverified"],
@@ -80,6 +89,7 @@ def candidate_manifest(rule_text: str, skill_name: str | None = None, interventi
     (what a human would say at session start). constraint: the rule PLUS a structured response schema
     that forces the worker to list the evidence it read and disclose regeneration - the checker
     verifies those paths against the trace."""
+    validate_intervention_type(intervention_type)
     m = copy.deepcopy(load_manifest(BASE_MANIFEST))
     m["model"] = worker_model()
     if rule_text and intervention_type in ("rule", "constraint"):
@@ -206,6 +216,8 @@ def run_worker(case_id: str, rule_text: str = "", reproduce_until_mistake: bool 
     Synchronous (~30-90s)."""
     if case_id not in C.BY_ID:
         return {"error": f"unknown case {case_id}"}
+    if intervention_type not in INTERVENTIONS:
+        return {"error": f"intervention_type must be one of {INTERVENTIONS}"}
     if (g := budget_guard(max_attempts)):
         return g
     attempts = []
@@ -322,6 +334,8 @@ def run_transfer(case_id: str, skill_name: str = "", rule_text: str = "", interv
     trap. Returns a job id."""
     if case_id not in C.BY_ID:
         return {"error": f"unknown case {case_id}"}
+    if intervention_type not in INTERVENTIONS:
+        return {"error": f"intervention_type must be one of {INTERVENTIONS}"}
 
     def work():
         rep = run_suite(candidate_manifest(rule_text, skill_name or None, intervention_type), [C.BY_ID[case_id]], 1, 1, "transfer")

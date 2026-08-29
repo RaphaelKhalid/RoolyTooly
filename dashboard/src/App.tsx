@@ -147,7 +147,27 @@ function BoardCard({ row }: { row: BoardRow }) { return <article className="boar
 
 function FamilyRow({ family }: { family: Family }) { return <tr className={family.fabricated_completion ? "highlight-row" : ""}><td><b>{family.family || "no data"}</b>{family.fabricated_completion && <span className="cap">fabricated_completion</span>}</td><td><MetricCell item={family.trap_runs} /></td><td><MetricCell item={family.mistakes} /></td><td><MetricCell item={family.repetition_rate} keyName="repetition_rate" /></td><td><MetricCell item={family.controls_passed} /></td><td><MetricCell item={family.mean_score} /></td></tr>; }
 
-function InterventionRow({ row }: { row: Intervention }) { const label = row.intervention_type || "no data"; const bench = row.repetition[0]; const control = row.control_pass[0]; return <div className="intervention-row"><div className="intervention-label"><span className="tag">{label}</span><span className="muted">{row.regressions.length} regression artifact{row.regressions.length === 1 ? "" : "s"}</span></div><div className="intervention-values"><div><span className="eyebrow">repetition</span><MetricCell item={bench?.before} keyName="mistake_repetition_rate" /><span className="arrow">→</span><MetricCell item={bench?.after} keyName="mistake_repetition_rate" /></div><div><span className="eyebrow">control pass</span><MetricCell item={control?.before} keyName="control_pass_rate" /><span className="arrow">→</span><MetricCell item={control?.after} keyName="control_pass_rate" /></div><div><span className="eyebrow">decision</span><Decision value={row.decisions[0]?.value} /><Artifact name={row.decisions[0]?.artifact} /></div></div>{row.regressions.slice(0, 3).map((regression) => <div className="regression" key={regression.artifact}><span>{regression.case_id || "no data"}</span><span>base fails <MetricCell item={regression.base_fails} /></span><span>candidate passes <MetricCell item={regression.candidate_passes} /></span><Decision value={regression.valid_regression_test.value === true ? "valid" : regression.valid_regression_test.value === false ? "invalid" : undefined} /><Artifact name={regression.artifact} /></div>)}</div>; }
+function InterventionRow({ row }: { row: Intervention }) {
+  const label = row.intervention_type || "no data";
+  const runCount = Math.max(row.repetition.length, row.control_pass.length, row.decisions.length);
+  return <div className="intervention-row">
+    <div className="intervention-label"><span className="tag">{label}</span><span className="muted">{row.regressions.length} regression artifact{row.regressions.length === 1 ? "" : "s"}</span></div>
+    {runCount ? Array.from({ length: runCount }, (_, index) => {
+      const bench = row.repetition[index];
+      const control = row.control_pass[index];
+      const decision = row.decisions[index];
+      return <div className="intervention-run" key={`${label}-${index}-${bench?.artifact || control?.artifact || decision?.artifact || "no-data"}`}>
+        <span className="run-label">comparison {index + 1}</span>
+        <div className="intervention-values">
+          <div><span className="eyebrow">repetition</span><MetricCell item={bench?.before} keyName="mistake_repetition_rate" /><span className="arrow">→</span><MetricCell item={bench?.after} keyName="mistake_repetition_rate" /></div>
+          <div><span className="eyebrow">control pass</span><MetricCell item={control?.before} keyName="control_pass_rate" /><span className="arrow">→</span><MetricCell item={control?.after} keyName="control_pass_rate" /></div>
+          <div><span className="eyebrow">decision</span><Decision value={decision?.value} /><Artifact name={decision?.artifact} /></div>
+        </div>
+      </div>;
+    }) : <Empty />}
+    {row.regressions.map((regression) => <div className="regression" key={regression.artifact}><span>{regression.case_id || "no data"}</span><span>base fails <MetricCell item={regression.base_fails} /></span><span>candidate passes <MetricCell item={regression.candidate_passes} /></span><Decision value={regression.valid_regression_test.value === true ? "valid" : regression.valid_regression_test.value === false ? "invalid" : undefined} /><Artifact name={regression.artifact} /></div>)}
+  </div>;
+}
 
 function LessonCard({ lesson }: { lesson: Lesson }) { return <article className="lesson-card"><div className="card-head"><div><span className="tag">{lesson.family || "no data"}</span><span className="intervention">{lesson.intervention_type || "no data"}</span></div><span className={`status ${lesson.status}`}>{lesson.status || "candidate"}</span></div><p className="rule">{lesson.rule_text || "no data"}</p><div className="provenance"><span>correction <code>{lesson.provenance?.correction_id || "no data"}</code></span><span>lesson <code>{lesson.provenance?.lesson_id || "no data"}</code></span><span>evidence <code>{lesson.provenance?.evidence_ids?.length ? lesson.provenance.evidence_ids.join(", ") : "no data"}</code></span><span>status <code>{lesson.provenance?.status_id || "candidate / no status record"}</code></span></div>{lesson.evidence?.map((item) => <div className="evidence-row" key={item.id}><span className="tag">{item.evidence_kind || "no data"}</span><Decision value={item.verdict} /><span>{item.summary ? JSON.stringify(item.summary) : "no data"}</span><Artifact name={item.artifact_path} /></div>)}{lesson.correction ? <div className="correction"><span className="eyebrow">correction</span><p>“{String(lesson.correction.user_correction || "no data")}”</p><Artifact name={typeof lesson.correction.evidence === "string" ? "ledger/ledger.jsonl" : undefined} /></div> : null}</article>; }
 
