@@ -50,7 +50,7 @@ must keep passing or the candidate is reverted.
 | Sandbox (Daytona) | every worker run, regression, benchmark and transfer test executes in a fresh sandbox |
 | Custom MCP tools | `lesson-ledger` (append-only corrections → lessons → evidence → promotion) and `eval-runner` (deterministic regression / benchmark / transfer jobs, budget guard) — `mcp_servers/` |
 | Catalog MCP tools | GitHub (skill push + PR), Bright Data (mistake mining) |
-| Persistent session | SQLite-backed sessions; the ledger and in-flight jobs survive a page refresh |
+| Persistent session | SQLite-backed sessions and the append-only ledger survive a page refresh; eval-runner jobs are persisted to `results/jobs.json` (a job interrupted by a server restart is reported as `lost`, never as running) |
 | Approval gates | `promote_lesson` (annotated destructive), GitHub `push_files` / `create_pull_request` |
 | Skills | every promoted lesson is a git-backed skill (`skills/<lesson>/SKILL.md`) loaded by fresh agents |
 
