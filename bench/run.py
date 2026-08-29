@@ -67,9 +67,6 @@ def _daytona(method: str, path: str):
         return None
 
 
-STALE_STARTED_MIN = 15.0  # only reclaimed when the pool is starving
-
-
 def purge_sandboxes(only_idle: bool = True) -> int:
     """Free capacity by deleting only terminal Daytona sandboxes."""
     sb = _daytona("GET", "/sandbox")
@@ -78,21 +75,10 @@ def purge_sandboxes(only_idle: bool = True) -> int:
     items = sb if isinstance(sb, list) else (sb.get("items") or sb.get("data") or [])
     idle_states = ("stopped", "stopping", "archived", "error", "build_failed")
     victims = [s for s in items if s.get("state") in idle_states]
-    # Worker turns never run longer than a few minutes and long sweeps run server-side without a
-    # sandbox, so a 'started' sandbox older than STALE_STARTED_MIN is a leak from an abandoned attempt.
-    import datetime
-    now = datetime.datetime.now(datetime.timezone.utc)
-    live = [s for s in items if s.get("state") not in idle_states]
-    starving = len(live) >= 9  # Daytona free tier: 10 live sandboxes; new cases fail when full
-    for sbx in items:
-        if sbx.get("state") != "started" or not starving:
-            continue
-        try:
-            created = datetime.datetime.fromisoformat(str(sbx.get("createdAt", "")).replace("Z", "+00:00"))
-        except ValueError:
-            continue
-        if (now - created).total_seconds() / 60 > STALE_STARTED_MIN:
-            victims.append(sbx)
+    # 'started' sandboxes are never deleted here: the provider response carries no ownership marker,
+    # so a live evaluation (or a long Code Mode run) cannot be told apart from a leak. TrueForge's
+    # auto-stop (1 min idle) + auto-delete (1 min) reclaim them; scripts/purge_sandboxes.py is the
+    # explicit, human-run cleanup for a wedged pool.
     # The provider response has no reliable ownership marker. Age, pool pressure, or an
     # explicit cleanup mode cannot prove that a started sandbox is abandoned, so never
     # force-delete a live evaluation from this global cleanup path. Keep the argument for
