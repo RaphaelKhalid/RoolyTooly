@@ -87,3 +87,26 @@ footer { margin-top: 44px; padding-top: 16px; border-top: 1px solid var(--line);
   .hero-inner { padding: 44px 20px; }
   .transfer-row { grid-template-columns: 1fr; }
 }
+
+.harness { padding: 24px 28px; border: 1px solid var(--line); background: #fff; }
+.harness-auth { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
+.harness-auth input { padding: 8px 10px; border: 1px solid var(--line); font-size: 13px; font-family: inherit; min-width: 220px; }
+.harness-error { margin: 0 0 14px; padding: 10px 12px; border-left: 3px solid var(--bad); background: #fff5f9; color: var(--burgundy); font-size: 13px; }
+.harness-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; margin-bottom: 14px; }
+.harness button { padding: 8px 14px; border: 1px solid var(--fuchsia); background: #fff; color: var(--fuchsia); font-size: 13px; font-weight: 600; font-family: inherit; cursor: pointer; }
+.harness button:hover:not(:disabled) { background: #fff5f9; }
+.harness button:disabled { opacity: .45; cursor: default; }
+.harness button.deny { border-color: var(--muted); color: var(--muted); }
+.harness-compose { margin-bottom: 14px; }
+.harness-compose textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--line); font-family: inherit; font-size: 13px; resize: vertical; }
+.harness-presets { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+.harness-presets button { max-width: 320px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.approval-card { display: flex; align-items: center; justify-content: space-between; gap: 12px; padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--fuchsia); background: #fff5f9; font-size: 13px; }
+.approval-actions { display: flex; gap: 8px; flex-shrink: 0; }
+.harness-feed { max-height: 420px; overflow-y: auto; margin-top: 14px; border-top: 1px solid var(--line); padding-top: 12px; }
+.feed-item { padding: 8px 0; border-bottom: 1px solid var(--line); font-size: 13px; line-height: 1.45; }
+.feed-item p { margin: 4px 0 0; }
+.feed-item.sub { margin-left: 22px; padding-left: 10px; border-left: 2px solid var(--line); color: var(--muted); }
+.feed-item.response { color: var(--muted); font-family: "IBM Plex Mono", Consolas, monospace; font-size: 12px; }
+.feed-item.meta { color: var(--muted); font-size: 11px; text-transform: uppercase; letter-spacing: .06em; }
+.feed-tool { margin-top: 4px; font-family: "IBM Plex Mono", Consolas, monospace; font-size: 12px; color: var(--burgundy); }
