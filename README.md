@@ -82,7 +82,8 @@ python mcp_servers/eval_server.py &             # :8902/mcp
 ```
 
 In TrueForge → Settings: add the OpenAI provider, the Daytona sandbox provider, the GitHub connector,
-and the two local MCP servers (`http://127.0.0.1:8901/mcp`, `http://127.0.0.1:8902/mcp`). Then:
+the Bright Data connector (remote MCP `https://mcp.brightdata.com/mcp?token=<BRIGHTDATA_API_KEY>`, used by
+Workflow C), and the two local MCP servers (`http://127.0.0.1:8901/mcp`, `http://127.0.0.1:8902/mcp`). Then:
 
 ```bash
 python - <<'EOF'
