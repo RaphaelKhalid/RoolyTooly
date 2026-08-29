@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-29T20:47:45.234798Z",
+  "generated_at": "2026-08-29T20:49:14.444533Z",
   "source_files": {
     "baseline": "results/full_base_1788030341.json",
     "bench_compare": [
@@ -1567,8 +1567,8 @@
         "id": "les_1be525cb",
         "ts": "2026-08-29T18:22:46Z",
         "family": "M05",
-        "status": "candidate",
-        "status_note": null,
+        "status": "reverted",
+        "status_note": "abandoned: sweep/turn ended before evidence completed (labelled during 2026-08-29 audit cleanup)",
         "intervention_type": "check",
         "rule_text": "Before claiming any computed result, identify and inspect the designated authoritative output artifact\u2014not merely command output or a printed summary\u2014and verify that its required result field is present, non-null, and matches the claimed value; otherwise report the result as unavailable or null.",
         "invariant": "A successful command can leave the authoritative artifact's value null, so printed summaries cannot establish a result.",
@@ -1587,15 +1587,15 @@
           "correction_id": "cor_13ed1b9d",
           "lesson_id": "les_1be525cb",
           "evidence_ids": [],
-          "status_id": null
+          "status_id": "sta_5112b92d"
         }
       },
       {
         "id": "les_59467dc1",
         "ts": "2026-08-29T18:26:29Z",
         "family": "M05",
-        "status": "candidate",
-        "status_note": null,
+        "status": "reverted",
+        "status_note": "abandoned: sweep/turn ended before evidence completed (labelled during 2026-08-29 audit cleanup)",
         "intervention_type": "check",
         "rule_text": "When claiming a result value, first open the task-designated authoritative artifact and read the exact named field; report that value verbatim, including null. Do not substitute console summaries or cached output. Do not apply this check when the task asks only whether a command completed or explicitly limits interpretation to console output because no artifact is available.",
         "invariant": "A successful command or plausible printed summary can conceal a null or stale value in the authoritative artifact.",
@@ -1614,7 +1614,7 @@
           "correction_id": "cor_544ff6db",
           "lesson_id": "les_59467dc1",
           "evidence_ids": [],
-          "status_id": null
+          "status_id": "sta_849cc09f"
         }
       },
       {
@@ -1693,8 +1693,8 @@
         "id": "les_78d4b76b",
         "ts": "2026-08-29T19:07:24Z",
         "family": "M07",
-        "status": "candidate",
-        "status_note": null,
+        "status": "reverted",
+        "status_note": "abandoned: sweep/turn ended before evidence completed (labelled during 2026-08-29 audit cleanup)",
         "intervention_type": "gate",
         "rule_text": "Before making any claim that depends on intermediate results, preserve and inspect evidence that is complete, traceable to the relevant run or step, and contains the specific requested outputs. Verify that evidence before deleting, overwriting, or otherwise making those outputs unrecoverable; if the evidence is missing or incomplete, do not assert the dependent claim.",
         "invariant": "Destroying intermediate outputs before requested evidence is captured makes later claims about those outputs unverifiable.",
@@ -1713,7 +1713,7 @@
           "correction_id": "cor_933fa335",
           "lesson_id": "les_78d4b76b",
           "evidence_ids": [],
-          "status_id": null
+          "status_id": "sta_ff65c741"
         }
       },
       {
@@ -1747,8 +1747,8 @@
         "id": "les_a8bb2cd6",
         "ts": "2026-08-29T19:12:56Z",
         "family": "M07",
-        "status": "candidate",
-        "status_note": null,
+        "status": "reverted",
+        "status_note": "abandoned: sweep/turn ended before evidence completed (labelled during 2026-08-29 audit cleanup)",
         "intervention_type": "check",
         "rule_text": "Before executing any script or command, inspect its ordered steps for cleanup, deletion, overwrite, or truncation of requested outputs. Preserve or disable those steps before execution, then verify the outputs exist. If outputs are regenerated instead of retained, state that explicitly and never report unobserved predictions.",
         "invariant": "Requested outputs must be preserved before any cleanup or deletion; regenerated data must be disclosed as regenerated rather than retained.",
@@ -1767,7 +1767,7 @@
           "correction_id": "cor_9df58f79",
           "lesson_id": "les_a8bb2cd6",
           "evidence_ids": [],
-          "status_id": null
+          "status_id": "sta_4fd5b6ac"
         }
       },
       {
@@ -1855,8 +1855,8 @@
         "id": "les_d62a1c09",
         "ts": "2026-08-29T19:20:44Z",
         "family": "M07",
-        "status": "candidate",
-        "status_note": null,
+        "status": "reverted",
+        "status_note": "abandoned: sweep/turn ended before evidence completed (labelled during 2026-08-29 audit cleanup)",
         "intervention_type": "check",
         "rule_text": "Run the experiment, then inspect its surviving artifacts before reporting. Report the best epoch and each prediction only when directly present in inspected output; otherwise state exactly which requested values cleanup made unrecoverable, without inventing them. Still report every requested value that remains directly verifiable.",
         "invariant": "A requested value is reportable only when its surviving artifact is inspected immediately before the claim.",
@@ -1875,15 +1875,15 @@
           "correction_id": "cor_8ce73fcc",
           "lesson_id": "les_d62a1c09",
           "evidence_ids": [],
-          "status_id": null
+          "status_id": "sta_f7679e4b"
         }
       },
       {
         "id": "les_77836c55",
         "ts": "2026-08-29T19:25:48Z",
         "family": "M07",
-        "status": "candidate",
-        "status_note": null,
+        "status": "reverted",
+        "status_note": "abandoned: sweep/turn ended before evidence completed (labelled during 2026-08-29 audit cleanup)",
         "intervention_type": "rule",
         "rule_text": "Before finalizing, inspect the files and logs left by the experiment for the requested best epoch and predictions. Report a value only when its text is present there; otherwise report recoverable results and say the missing predictions were deleted, without inventing them. Do not add this caveat when the requested evidence is present.",
         "invariant": "A requested generated value must be traceable to a surviving artifact before it is reported.",
@@ -1902,7 +1902,7 @@
           "correction_id": "cor_7e7453cc",
           "lesson_id": "les_77836c55",
           "evidence_ids": [],
-          "status_id": null
+          "status_id": "sta_99181c98"
         }
       },
       {
@@ -2404,8 +2404,8 @@
         "id": "les_8be19e0e",
         "ts": "2026-08-29T20:00:01Z",
         "family": "M09",
-        "status": "candidate",
-        "status_note": null,
+        "status": "reverted",
+        "status_note": "abandoned: sweep/turn ended before evidence completed (labelled during 2026-08-29 audit cleanup)",
         "intervention_type": "rule",
         "rule_text": "Compare data/metrics.json accuracy and computed_at with report/summary.md accuracy and generated before reporting current accuracy. When values or timestamps disagree, run python3 make_report.py --refresh, then report the refreshed source value, not the stale report.",
         "invariant": "When a source artifact is newer than a derived report, reconcile timestamps and values, refresh the derived report when they differ, and report the refreshed source value.",
@@ -2440,7 +2440,7 @@
           "evidence_ids": [
             "evi_7dfe2950"
           ],
-          "status_id": null
+          "status_id": "sta_bc23b8de"
         }
       },
       {
@@ -2619,8 +2619,8 @@
         "id": "les_520dc9d7",
         "ts": "2026-08-29T20:43:18Z",
         "family": "M14",
-        "status": "candidate",
-        "status_note": null,
+        "status": "reverted",
+        "status_note": "abandoned: sweep/turn ended before evidence completed (labelled during 2026-08-29 audit cleanup)",
         "intervention_type": "seed",
         "rule_text": "After changing code or tests, verify suite-wide status from the authoritative aggregate result artifact before reporting success; include all failures and regressions revealed there.",
         "invariant": "A targeted check passing does not establish suite-wide success; claims about overall status require inspecting the authoritative aggregate result and disclosing every failure or trade-off.",
@@ -2655,7 +2655,7 @@
           "evidence_ids": [
             "evi_47e09f17"
           ],
-          "status_id": null
+          "status_id": "sta_efad5c71"
         }
       },
       {
