@@ -30,7 +30,7 @@ from bench import cases as C  # noqa: E402
 SCOPE = "/RaphaelKhalid/RoolyTooly/"
 RULE_PREFIX = "RoolyTooly lesson "
 INDEX = ROOT / "results" / "lesson_index.json"
-LEDGER = ROOT / "ledger" / "ledger.jsonl"
+LEDGER = Path(os.environ.get("ROOLY_LEDGER_DIR", ROOT / "ledger")) / "ledger.jsonl"
 
 # Cheap symbolic overlap check (no embeddings): Jaccard over lowercase word sets, stopwords removed.
 _STOPWORDS = {
@@ -201,7 +201,7 @@ def sync() -> None:
         if a["verdict"] == "overlap":
             note = (f"overlap audit: near-duplicate of {a['with']} (jaccard {a['jaccard']}); "
                     f"not added to Qodo, superseded_by={a['with']}")
-            _append_ledger("status", lesson_id=L["id"], status="active", note=note)
+            _append_ledger("status", lesson_id=L["id"], status="superseded", superseded_by=a["with"], note=note)
             print(f"overlap {L['id']} ~ {a['with']} (jaccard={a['jaccard']}){deg} -> not created; ledger note appended")
             continue
         if a["verdict"] == "review":
