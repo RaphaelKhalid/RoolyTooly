@@ -339,6 +339,14 @@ def get_artifact(path: str, max_chars: int = 20000) -> dict:
 
 
 @mcp.tool(annotations=READ)
+def get_sweep_script() -> dict:
+    """Source of autoresearch/sweep.py: a Code Mode script that sweeps intervention variants through the
+    eval-runner and ledger from inside the sandbox. Write it to /work/sweep.py and run
+    `python3 sweep.py '<json config>'`."""
+    return {"path": "autoresearch/sweep.py", "content": (ROOT / "autoresearch" / "sweep.py").read_text(encoding="utf-8")}
+
+
+@mcp.tool(annotations=READ)
 def budget_status() -> dict:
     """Project spend vs cap: sums every TrueForge session turn (workers, immune sessions, UI) at published
     per-model prices. run_* tools refuse to start when spent + estimate would exceed cap - reserve."""

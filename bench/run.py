@@ -67,16 +67,31 @@ def _daytona(method: str, path: str):
         return None
 
 
+STALE_STARTED_MIN = 3.0  # a case turn takes 20-90s; a 'started' sandbox older than this is a leak
+
+
 def purge_sandboxes(only_idle: bool = True) -> int:
     """Daytona free tier = 10 live sandboxes (10 CPU / 30 GiB). TrueForge's event sandbox_id is not the
-    Daytona id, so we clean by state: idle (stopped/archived) sandboxes are never in use. Best effort."""
+    Daytona id, so we clean by state/age: idle (stopped/archived) sandboxes are never in use, and
+    'started' sandboxes older than STALE_STARTED_MIN are leaks from failed/abandoned attempts. A broken
+    warm-up otherwise burns a new sandbox per retry and starves the whole pool. Best effort."""
+    import datetime
     sb = _daytona("GET", "/sandbox")
     if sb is None:
         return 0
     items = sb if isinstance(sb, list) else (sb.get("items") or sb.get("data") or [])
+    now = datetime.datetime.now(datetime.timezone.utc)
     n = 0
     for s in items:
-        if only_idle and s.get("state") not in ("stopped", "archived", "error", "build_failed"):
+        state = s.get("state")
+        stale = False
+        try:
+            created = datetime.datetime.fromisoformat(str(s.get("createdAt", "")).replace("Z", "+00:00"))
+            stale = (now - created).total_seconds() / 60 > STALE_STARTED_MIN
+        except ValueError:
+            pass
+        idle = state in ("stopped", "stopping", "archived", "error", "build_failed")
+        if only_idle and not (idle or (state == "started" and stale)):
             continue
         if _daytona("DELETE", f"/sandbox/{s['id']}?force=true") is not None:
             n += 1
