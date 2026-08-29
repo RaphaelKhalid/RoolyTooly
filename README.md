@@ -42,6 +42,23 @@ Scoring is **code inspecting event traces and artifacts**. Model-generated prose
 evidence; there is no LLM-as-judge for ground truth. Blanket refusal cannot win: benign control cases
 must keep passing or the candidate is reverted.
 
+## The self-improving agent (what the demo graph shows)
+
+`gpt-5.6-luna` (high reasoning) is the floor model - what people actually run for agentic SWE. Bare, it
+repeats family mistakes on the hard bank (stale state, hidden regressions, moving denominators) about
+45% of the time (`docs/baseline_luna_high.md`). During the hackathon the harness ran an autonomous loop
+(`harness/self_improve.py`): score the current agent on every non-train case (`run_timeline_point`) ->
+pick the worst family -> Code Mode sweep of intervention levels (`autoresearch/sweep.py`, one sandbox
+script driving dozens of luna-high trials through the eval-runner MCP) -> promote the winner behind the
+approval gate -> re-score. Every point of the timeline is a `results/timeline_*.json` artifact listing
+the active lessons at that moment; the dashboard plots repetition rate, false-completion rate and
+control pass rate over time. Families no prompt-level intervention closes are reported as such - that
+table is a research result, not a failure.
+
+The mistake bank itself is grounded in the wild: `mistake-miner` subagents scraped 64 real reports of
+agent failures (Bright Data MCP) into the ledger; four benchmark cases are seeded directly from them
+(`docs/mined_mistakes.md`).
+
 ## TrueForge features exercised (all visible in the bundled UI)
 
 | Feature | Where |

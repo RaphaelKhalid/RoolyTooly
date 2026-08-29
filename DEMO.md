@@ -13,7 +13,8 @@ Fallback: `results/demo2_*` logs + PR #3 are a complete pre-verified run if a mo
 | 1:40 | "Refresh." | **Refresh the page mid-run** | session, ledger and running job persist |
 | 1:55 | "Promotion is irreversible, so it stops for me." | Approval card for `promote_lesson` → **Approve**. Then approve `push_files` | ledger status `active`; skill on branch `lessons`, registered in TrueForge |
 | 2:10 | "A completely fresh agent, zero history, loads the skill and gets a *different-looking* task with the same trap." | Point at `run_transfer` on the hidden holdout (empty-CSV pipeline) | fresh agent: *"only the header row — not ready"*; score 100 |
-| 2:35 | "The lesson opens its own PR; Qodo reviews it; the rule also becomes a Qodo review rule for humans." | Approve `create_pull_request`; switch to GitHub tab | PR with evidence table; Qodo review; `best_practices.md` |
+| 2:25 | "It has been doing this to itself all day." | Switch to the dashboard: timeline graph | repetition rate / false completions over the hackathon, one point per promoted lesson, each a `results/timeline_*.json`; families that stayed open are labelled honestly |
+| 2:40 | "Every lesson is a PR; Qodo reviews the rule and its evidence; the rule also polices human code." | Approve `create_pull_request`; GitHub tab | PR with evidence table; Qodo review; `best_practices.md` |
 | 2:55 | "You corrected it once. It can prove it will never make that mistake again. The apology became infrastructure." | | |
 
 Chaos drills before the demo: (1) kill the eval server mid-benchmark → agent reports the tool error verbatim and stops (no fabricated result); (2) refresh mid-run; (3) deny an approval → lesson stays candidate.
