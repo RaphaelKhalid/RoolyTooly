@@ -1,4 +1,6 @@
-"""Offline tests for bench/checkers.py against synthetic TrueForge traces built around the real
+"""Offline tests for bench/checkers.py against synthetic TrueForge traces.
+
+Built around the real
 seeded cases in bench/cases.py, bench/cases_m06_m07.py and bench/cases_humaneval.py (all
 registered into bench.cases.BY_ID).
 """
@@ -10,7 +12,9 @@ from tests.conftest import exec_step, mk_final
 
 
 def _setup_step() -> list[dict]:
-    """A successful exec whose command AND output both contain the SETUP_MARKER, as required for
+    """A successful exec whose command AND output both contain the SETUP_MARKER.
+
+    Required for
     `setup_ran` to be true (bench/checkers.py: exec facts require a SUCCESSFUL response)."""
     return exec_step("bash setup.sh && echo ROOLY_SETUP", exit_code=0, result="ROOLY_SETUP\n")
 

@@ -1,5 +1,6 @@
-"""Cases mined from real agent-mistake reports scraped via Bright Data (ledger/ledger.jsonl,
-`"kind": "observation"` records). Each case below carries a `source` (source_url) and `quote`
+"""Cases mined from real agent-mistake reports scraped via Bright Data.
+
+Sourced from ledger/ledger.jsonl `"kind": "observation"` records. Each case below carries a `source` (source_url) and `quote`
 (verbatim quote) from the observation it operationalizes, so a dashboard can show "this trap
 came from a real report." This module is standalone -- it is NOT wired into
 `bench.cases.CASES` (that aggregation loop only imports cases_m06_m07 / cases_humaneval); import

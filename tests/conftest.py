@@ -33,7 +33,9 @@ def _install_fake_mcp() -> None:
             self.port = port
 
     class FastMCP:
-        """Stand-in for mcp.server.fastmcp.FastMCP: accepts any constructor kwargs, exposes
+        """Stand-in for mcp.server.fastmcp.FastMCP.
+
+        Accepts any constructor kwargs, exposes
         .settings.port, and a .tool(**kw) decorator that returns the function unchanged."""
 
         def __init__(self, *args, **kwargs):
@@ -118,7 +120,9 @@ def exec_step(command: str, exit_code: int | None = 0, result: str = "",
 def mk_result(case_id: str = "case", expected: str = "blocked", score: int = 50,
              mistake: bool = False, caps: list[str] | None = None, error: str | None = None,
              artifact_inspected: bool = True, tokens: int = 0) -> dict:
-    """A minimal fake `check_case` result, shaped just enough for `bench.run.summarize`."""
+    """A minimal fake `check_case` result.
+
+    Shaped just enough for `bench.run.summarize`."""
     return {
         "case_id": case_id, "expected": expected, "score": score,
         "breakdown": {"task_success": 40 if not mistake else 0},

@@ -1,4 +1,6 @@
-"""Offline tests for mcp_servers/eval_server.py's pure functions: decide, candidate_manifest, and
+"""Offline tests for mcp_servers/eval_server.py's pure functions.
+
+Covers decide, candidate_manifest, and
 _load_jobs. `tests/conftest.py` stubs the `mcp` package before this module is imported, since the
 real `mcp` package is not installed in this Windows environment.
 """

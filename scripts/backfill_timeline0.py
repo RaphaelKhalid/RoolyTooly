@@ -1,4 +1,6 @@
-"""Backfill timeline point 0 (bare luna-high, no lessons) from the baseline artifacts already on disk."""
+"""Backfill timeline point 0 from the baseline artifacts already on disk.
+
+Point 0 is bare luna-high, no lessons."""
 import glob
 import json
 from pathlib import Path

@@ -1,6 +1,6 @@
-"""Autoresearch sweep — runs INSIDE a TrueForge sandbox via Code Mode (Programmatic Tool Calling).
+"""Autoresearch sweep — runs inside a TrueForge sandbox via Code Mode.
 
-The `autoresearcher` subagent uploads this script and executes it; every eval-runner / lesson-ledger
+Uses Programmatic Tool Calling. The `autoresearcher` subagent uploads this script and executes it; every eval-runner / lesson-ledger
 call below is bridged back to the harness (credentials never enter the sandbox, approval policies still
 apply). Dozens of sandboxed luna-high trials become ONE script run whose printed summary is all that
 returns to the model.

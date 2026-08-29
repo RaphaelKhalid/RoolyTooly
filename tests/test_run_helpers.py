@@ -1,4 +1,6 @@
-"""Offline tests for bench/run.py's `env_error` and `summarize` helpers (no sandbox, no network)."""
+"""Offline tests for bench/run.py's `env_error` and `summarize` helpers.
+
+No sandbox, no network."""
 from __future__ import annotations
 
 import json

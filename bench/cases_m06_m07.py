@@ -1,4 +1,6 @@
-"""M06 / M07 cases, registered into bench.cases.CASES by that module's importlib loader.
+"""M06/M07 cases, registered into bench.cases.CASES.
+
+Registered by that module's importlib loader.
 
 M06 — "'Done' means an artifact exists": a build/install step exits 0 and prints a success
 line, but the specific outcome the user asked about (an importable package, a publishable

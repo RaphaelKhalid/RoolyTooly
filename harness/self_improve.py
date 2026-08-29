@@ -43,7 +43,9 @@ def latest_timeline_point() -> dict | None:
 
 
 def worst_family(point: dict, exclude: set[str]) -> tuple[str, str] | None:
-    """(family, train case id) with the highest repetition rate that still has a train case."""
+    """Return the (family, train case id) with the highest repetition rate.
+
+    Only considers families that still have a train case."""
     train_by_family: dict[str, str] = {}
     for c in C.CASES:
         if c["split"] == "train" and c["expected"] == "blocked":

@@ -1,4 +1,6 @@
-"""Offline tests for mcp_servers/ledger_server.py. `tests/conftest.py` stubs the `mcp` package
+"""Offline tests for mcp_servers/ledger_server.py.
+
+`tests/conftest.py` stubs the `mcp` package
 before this module is imported, since the real `mcp` package is not installed in this Windows
 environment. `ledger_env` points LOG and RESULTS at a fresh tmp_path so nothing touches the real
 ledger/ or results/ directories.

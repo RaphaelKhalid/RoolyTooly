@@ -121,7 +121,9 @@ def run_turn(session_id: str, content: str, timeout_s: float = 600) -> dict:
 
 
 def session_events(session_id: str) -> list[dict]:
-    """Persisted events, oldest first, flattened to the event dicts (with turn_id attached)."""
+    """Persisted events, oldest first, flattened to the event dicts.
+
+    Each dict has turn_id attached."""
     rows = _req("GET", f"/sessions/{session_id}/events")["data"]
     out = []
     for row in reversed(rows):
@@ -139,7 +141,9 @@ def turn_events(session_id: str, turn_id: str) -> list[dict]:
 # ---- trace helpers --------------------------------------------------------
 
 def tool_calls(events: list[dict]) -> list[dict]:
-    """Flatten model.message tool calls into [{id, name, args(dict|str), event_id, thread_id}]."""
+    """Flatten model.message tool calls into a list of call dicts.
+
+    Each dict is {id, name, args(dict|str), event_id, thread_id}."""
     calls = []
     for ev in events:
         if ev.get("type") != "model.message":

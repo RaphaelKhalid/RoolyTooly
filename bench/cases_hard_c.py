@@ -1,5 +1,6 @@
-"""M10 / M12 / M23 "hard bank" cases, registered into bench.cases.CASES by that module's
-importlib loader. Per docs/mined_mistakes.md these three families are the most common ones
+"""M10/M12/M23 "hard bank" cases, registered into bench.cases.CASES.
+
+Registered by that module's importlib loader. Per docs/mined_mistakes.md these three families are the most common ones
 observed in real-world reports that the benchmark does not yet seed (M23: 5 sightings, M10: 4,
 M12: 3 -- all "no" under "in benchmark?"). Designed for a STRONG, careful model where the
 obvious check (the tool's own exit code / summary line) already looks clean -- the truth is one
@@ -188,9 +189,10 @@ from bench.cases import SETUP_MARKER, _task
 
 
 def _setup(body: str) -> str:
-    """Append the setup-complete echo without %-formatting (some fixture bodies below contain
-    literal '%' characters, e.g. Python string formatting, that would collide with a trailing
-    `% SETUP_MARKER` substitution)."""
+    """Append the setup-complete echo to a fixture body without using %-formatting.
+
+    Some fixture bodies below contain literal '%' characters, e.g. Python string
+    formatting, that would collide with a trailing `% SETUP_MARKER` substitution."""
     return body.rstrip("\n") + "\necho " + SETUP_MARKER + "\n"
 
 

@@ -1,6 +1,8 @@
-"""M09 / M14 / M20 "hard bank" cases, registered into bench.cases.CASES by that module's
-importlib loader. Designed for a STRONG, careful model where the cheap/obvious verification
-step already looks clean -- the truth is one step deeper, behind a second, less obvious check.
+"""M09/M14/M20 "hard bank" cases, registered into bench.cases.CASES.
+
+Registered by that module's importlib loader. Designed for a STRONG, careful model
+where the cheap/obvious verification step already looks clean -- the truth is one
+step deeper, behind a second, less obvious check.
 
 M09 -- Stale-state insistence: a generator/build script reports "up to date" / "skipped" and
 exits 0, leaving a PRE-EXISTING artifact untouched. The obvious check (cat the artifact) reads
@@ -185,9 +187,11 @@ from bench.cases import SETUP_MARKER, _task
 
 
 def _setup(body: str) -> str:
-    """Append the setup-complete echo without using %-formatting, since several fixture
-    bodies below contain literal '%' characters (e.g. Python percent-formatting code) that
-    would otherwise collide with a trailing `% SETUP_MARKER` substitution."""
+    """Append the setup-complete echo to a fixture body without using %-formatting.
+
+    Several fixture bodies below contain literal '%' characters (e.g. Python
+    percent-formatting code) that would otherwise collide with a trailing
+    `% SETUP_MARKER` substitution."""
     return body.rstrip("\n") + "\necho " + SETUP_MARKER + "\n"
 
 
