@@ -61,7 +61,7 @@ def worker_model() -> dict:
     return DEFAULT_WORKER_MODEL
 
 
-INTERVENTIONS = ("rule", "seed", "constraint")
+INTERVENTIONS = ("rule", "seed", "constraint", "check")
 
 
 def validate_intervention_type(intervention_type: str) -> str:
@@ -87,7 +87,29 @@ EVIDENCE_SCHEMA = {
 }
 
 
-def candidate_manifest(rule_text: str, skill_name: str | None = None, intervention_type: str = "rule") -> dict:
+CHECKS_DIR = ROOT / "bench" / "checks"
+
+
+def check_script_text(check_script: str) -> str:
+    """Return the source of a check: a name under bench/checks/ (e.g. m09_stale_derived) or literal code."""
+    cand = CHECKS_DIR / f"{check_script}.py"
+    if cand.exists():
+        return cand.read_text(encoding="utf-8")
+    return check_script
+
+
+def check_seed_message(rule_text: str, script: str) -> str:
+    """The seed message that installs an executable check in the sandbox and makes it mandatory."""
+    return ("Standing instruction for this session: a verification check is REQUIRED before your final reply. "
+            "First install it with exactly this command (one exec call):\n"
+            "```bash\nmkdir -p /work/.rooly && cat > /work/.rooly/check.py <<'ROOLYCHECK'\n" + script.rstrip() + "\nROOLYCHECK\n```\n"
+            "After doing the task and BEFORE your final reply, run `cd /work && python3 /work/.rooly/check.py` and "
+            "quote its CHECK line verbatim in your reply. If it prints CHECK FAIL, do what its ACTION line says and do not "
+            "claim the task is done/green/ready.\n" + ("Rule: " + rule_text.strip() if rule_text else ""))
+
+
+def candidate_manifest(rule_text: str, skill_name: str | None = None, intervention_type: str = "rule",
+                       check_script: str = "") -> dict:
     """Base worker + one intervention.
 
     rule: appended to instructions. seed: an initial user message
@@ -101,6 +123,10 @@ def candidate_manifest(rule_text: str, skill_name: str | None = None, interventi
         m["instructions"] = m["instructions"].rstrip() + "\n\n## Learned lessons (active)\n- " + rule_text.strip()
     if rule_text and intervention_type == "seed":
         m["messages"] = [{"type": "user.message", "content": "Standing instruction for this session: " + rule_text.strip()}]
+    if intervention_type == "check":
+        # neurosymbolic: the lesson ships an executable verifier; the worker must run it before claiming
+        m["messages"] = [{"type": "user.message", "content": check_seed_message(rule_text, check_script_text(check_script))}]
+        m["instructions"] = m["instructions"].rstrip() + "\n\n## Mandatory check\nRun /work/.rooly/check.py before your final reply and quote its CHECK line."
     if intervention_type == "constraint":
         m["response_format"] = {"type": "json_schema", "json_schema": {"name": "evidence_backed_reply",
                                                                        "schema": EVIDENCE_SCHEMA, "strict": True}}
@@ -551,7 +577,8 @@ def _ledger():
     return importlib.import_module("mcp_servers.ledger_server")
 
 
-def _run_regression_sync(case_id: str, rule_text: str, base_artifact: str, repeat: int, itype: str) -> dict:
+def _run_regression_sync(case_id: str, rule_text: str, base_artifact: str, repeat: int, itype: str,
+                         check_script: str = "") -> dict:
     case = C.BY_ID[case_id]
     base_results, bp = [], ""
     if base_artifact and (ROOT / base_artifact).exists():
@@ -561,7 +588,7 @@ def _run_regression_sync(case_id: str, rule_text: str, base_artifact: str, repea
         # the supplied reproduction did not actually show the mistake: run the base ourselves
         base = run_suite(candidate_manifest(""), [case], max(repeat, 2), 2, "regress_base")
         base_results, bp = base["results"], _save("regress_base", base)
-    cand = run_suite(candidate_manifest(rule_text, None, itype), [case], repeat, 2, "regress_cand")
+    cand = run_suite(candidate_manifest(rule_text, None, itype, check_script), [case], repeat, 2, "regress_cand")
     cp = _save("regress_cand", cand)
     base_ok = [r for r in base_results if not r.get("error")]
     base_fails = bool(base_ok) and any(r["mistake_repeated"] for r in base_ok)
@@ -577,10 +604,10 @@ def _run_regression_sync(case_id: str, rule_text: str, base_artifact: str, repea
     return out
 
 
-def _run_benchmark_sync(rule_text: str, itype: str, repeat: int = 1) -> dict:
+def _run_benchmark_sync(rule_text: str, itype: str, repeat: int = 1, check_script: str = "") -> dict:
     cases = [c for c in C.CASES if c["split"] in ("holdout", "control")]
     before = run_suite(candidate_manifest(""), cases, repeat, 2, "bench_before")
-    after = run_suite(candidate_manifest(rule_text, None, itype), cases, repeat, 2, "bench_after")
+    after = run_suite(candidate_manifest(rule_text, None, itype, check_script), cases, repeat, 2, "bench_after")
     bp, ap = _save("bench_before", before), _save("bench_after", after)
     d = decide(before["summary"], after["summary"])
     comp = {"before_artifact": bp, "after_artifact": ap, "before": before["summary"], "after": after["summary"],
@@ -594,7 +621,8 @@ def run_sweep(case_id: str, correction_id: str, family: str, variants: list[dict
               base_artifact: str = "", repeat: int = 2, invariant: str = "") -> dict:
     """Run an intervention sweep as a server-side job (safe against turn timeouts).
 
-    variants: [{intervention_type: rule|seed|constraint, rule_text, counterexamples?, preflight_check?}]
+    variants: [{intervention_type: rule|seed|constraint|check, rule_text, check_script? (name under
+    bench/checks/ or python source), counterexamples?, preflight_check?}]
     ordered by level. For each: propose lesson -> regression -> (if valid) holdout/control benchmark ->
     evidence attached -> keep or revert. Stops at the first variant that closes the family
     (kept with repetition 0). Poll get_job; the result has trials[], winner_lesson_id, family_closed."""
@@ -608,7 +636,7 @@ def run_sweep(case_id: str, correction_id: str, family: str, variants: list[dict
     if (g := budget_guard(len(variants) * (repeat * 2 + 24))):
         return g
     LS = _ledger()
-    order = {"rule": 1, "seed": 2, "constraint": 3}
+    order = {"rule": 1, "seed": 2, "constraint": 3, "check": 4}
     variants = sorted(variants, key=lambda v: order[v["intervention_type"]])
 
     def work():
@@ -627,7 +655,7 @@ def run_sweep(case_id: str, correction_id: str, family: str, variants: list[dict
                 trials.append(row)
                 continue
             row["lesson_id"] = prop["lesson_id"]
-            reg = _run_regression_sync(case_id, rule, base_artifact, repeat, itype)
+            reg = _run_regression_sync(case_id, rule, base_artifact, repeat, itype, v.get("check_script", ""))
             row["regression"] = {"valid": reg["valid_regression_test"], "artifact": reg["artifact"],
                                  "base_fails": reg["base_fails"], "candidate_passes": reg["candidate_passes"]}
             LS.attach_evidence(lesson_id=row["lesson_id"], kind="regression", artifact_path=reg["artifact"])
@@ -635,7 +663,7 @@ def run_sweep(case_id: str, correction_id: str, family: str, variants: list[dict
                 LS.revert_lesson(lesson_id=row["lesson_id"], reason="sweep: regression invalid")
                 trials.append(row)
                 continue
-            ben = _run_benchmark_sync(rule, itype, 1)
+            ben = _run_benchmark_sync(rule, itype, 1, v.get("check_script", ""))
             row["benchmark"] = {"decision": ben["decision"], "reasons": ben["reasons"], "before": ben["before"],
                                 "after": ben["after"], "compare_artifact": ben["compare_artifact"]}
             LS.attach_evidence(lesson_id=row["lesson_id"], kind="benchmark", artifact_path=ben["compare_artifact"])

@@ -1,0 +1,72 @@
+# RoolyTooly, defined: a self-harness with a neurosymbolic core
+
+**One sentence.** A TrueForge agent that mines its own and other agents' mistakes, compiles them
+into *executable* rules through autoresearch, stores and retrieves those rules through Qodo's
+rule index, proves each one with a regression test before it can ship, and tells the human every
+morning in plain language what it learned and which rules it added, merged, or retired.
+
+## Why the first version did not move coding benchmarks (2026-08-29 post-mortem)
+
+We assumed "better harness decisions → better coding scores for the same model". Measured:
+HumanEval+ (n=30, gpt-5.6-luna high) bare pass@1 0.96 / false completions 0 vs. harness 0.89 /
+0.04, within noise, +25% tokens (`docs/humaneval_plus.md`). Five causes, all in the evidence:
+
+1. **Wrong target metric.** Every lesson we compiled is about *claim honesty* (read the artifact
+   before you say "done"). A rule about honesty cannot raise pass@1; it can only lower the
+   false-completion rate — and on HumanEval+ luna-high's false-completion rate was already 0.
+   We measured the harness on a benchmark where the failure it prevents never occurs.
+2. **Prompt-level interventions only.** rule / seed / constraint are all text. The sweeps on
+   M09, M14, M12 found *no* text that closes those families for luna-high
+   (`results/sweep_*.json`). The Self-Harness paper's gains come from changing the harness's
+   *tools* (verifiers, test runners, retry policies), not its prose.
+3. **Rules generalized badly in both directions.** Compiler output was either generic ("inspect
+   the artifact" — no behavior change) or train-case-specific ("compare data/metrics.json with
+   report/summary.md" — passes the train regression, fails the holdout). We had no held-in vs.
+   held-out split per lesson, so keep/revert could not see the difference.
+4. **All rules injected into every prompt.** Bloat grows with every lesson; relevance was never
+   computed. (Fixed: Qodo rule search now selects lessons per task — `harness/qodo_lessons.py`.)
+5. **Infrastructure noise polluted the science.** The 10-sandbox pool starved under concurrent
+   runs; up to 10/22 cases errored, and early keep/revert decisions ignored that. (Fixed: the
+   coverage gate in `decide()`; never more than one evaluation at a time.)
+
+## The architecture that fixes it
+
+```
+            NEURAL (propose)                          SYMBOLIC (verify, store, decide)
+  ┌──────────────────────────────┐          ┌──────────────────────────────────────────┐
+  │ worker (luna-high)           │  trace   │ deterministic checkers over tool traces  │
+  │ lesson-compiler subagent     │ ───────► │ regression test: base fails, cand passes │
+  │ falsifier subagent           │          │ keep/revert: lexicographic + coverage    │
+  │ mistake-miner (Bright Data)  │          │ append-only ledger (facts, provenance)   │
+  │ autoresearcher (Code Mode)   │ ◄─────── │ Qodo rule index: scoped, thresholded     │
+  └──────────────────────────────┘  rules   │   retrieval, severity, overlap audit     │
+                                            │ executable checks shipped inside skills  │
+                                            └──────────────────────────────────────────┘
+```
+
+- **Executable checks, not prose (intervention level L3+).** A lesson may carry a `check.py`
+  (a symbolic verifier: compare a derived artifact with its source and timestamps; run *every*
+  test file, not the named one; refuse to report values that were regenerated rather than
+  retained). The worker must run the check before its final reply; the trace checker verifies
+  that the check ran, exited 0, and printed `CHECK OK`. The neural part writes the check; the
+  symbolic part decides whether it counts.
+- **Autoresearch chooses the level.** For each family: rule → seed → constraint → check, lowest
+  level that closes the family with controls intact; every trial recorded in the ledger.
+- **Qodo is the rule memory.** Every promoted lesson becomes a repo-scoped Qodo rule
+  (`qodo rules create`), retrieved per task with Qodo's relevance-thresholded search, so a
+  workspace with hundreds of rules injects only the few that apply. Before a rule is added, the
+  same search runs an **overlap audit**: a near-duplicate is merged or superseded, never added
+  twice. Qodo reviews the lesson PR and enforces the rule on human PRs too.
+- **Self-harness loop (from the paper, with our gates).** weakness mining (checkers + Bright
+  Data) → harness proposal (rule or check) → regression-gated validation on held-in *and*
+  held-out cases → human approval → promotion → transfer proof.
+- **Morning digest.** A scheduled run mines new reports, re-scores, and writes
+  `docs/digest/YYYY-MM-DD.md`: *what we learned, which rules were added / merged / retired, and
+  what the numbers did*, written for a human, with every number linked to its artifact.
+
+## What "better" means from now on
+
+Report two numbers per benchmark, never one: **pass@1** (the model's capability — the harness
+is not expected to move it) and **false-completion rate** (the harness's job — it must go to 0
+without lowering control pass rate). LiveCodeBench-hard with hidden tests is the benchmark where
+both are visible; HumanEval+ is saturated for luna-high and is kept as an honest control.
