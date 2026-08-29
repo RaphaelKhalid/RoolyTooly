@@ -10,6 +10,7 @@ import {
   HarnessAuthError,
   type EventRow,
   type RequiredAction,
+  type ToolCall,
   type TurnStatus,
 } from "./tf";
 
@@ -120,6 +121,51 @@ function derivePipeline(events: EventRow[]): { active: PipelineStepId | null; do
   return { active, done };
 }
 
+// Known subagent roles the create_sub_agent tool spawns. Used only to label
+// subagent cards in the feed — falls back to a generic "subagent" label.
+const SUBAGENT_NAMES = ["lesson-compiler", "falsifier", "autoresearcher", "mistake-miner"];
+
+function deriveSubAgentNames(events: EventRow[]): Map<string, string> {
+  const names = new Map<string, string>();
+  let pending: string | null = null;
+  for (const row of events) {
+    const ev = row.event;
+    if (ev.type === "model.message") {
+      for (const tc of ev.tool_calls ?? []) {
+        if (tc.function?.name === "create_sub_agent") {
+          const args = (tc.function.arguments ?? "").toLowerCase();
+          pending = SUBAGENT_NAMES.find((n) => args.includes(n)) ?? "subagent";
+        }
+      }
+    } else if (ev.type === "thread.created" && ev.thread_id) {
+      if (pending) {
+        names.set(ev.thread_id, pending);
+        pending = null;
+      }
+    }
+  }
+  return names;
+}
+
+// Best-effort pairing of a model.message's tool_calls with the tool.response
+// events that immediately follow it in the stream, so a chip can show its
+// own response when expanded.
+function collectResponses(events: EventRow[], startIndex: number, count: number): (string | undefined)[] {
+  const out: (string | undefined)[] = [];
+  let i = startIndex + 1;
+  while (out.length < count && i < events.length) {
+    const ev = events[i].event;
+    if (ev.type === "tool.response") {
+      out.push(ev.content ?? undefined);
+    } else if (ev.type === "model.message") {
+      break;
+    }
+    i++;
+  }
+  while (out.length < count) out.push(undefined);
+  return out;
+}
+
 function Harness() {
   const [password, setPassword] = useState(() => getStoredPassword());
   const [passwordDraft, setPasswordDraft] = useState(password);
@@ -131,6 +177,7 @@ function Harness() {
   const [events, setEvents] = useState<EventRow[]>([]);
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
+  const [sentByTurn, setSentByTurn] = useState<Record<string, string>>({});
   const pollRef = useRef<number | null>(null);
 
   const stopPolling = () => {
@@ -180,6 +227,7 @@ function Harness() {
       setTurnStatus(null);
       setRequiredActions([]);
       setEvents([]);
+      setSentByTurn({});
     } catch (e) {
       handleError(e);
     } finally {
@@ -197,6 +245,7 @@ function Harness() {
       setTurnStatus("running");
       setRequiredActions([]);
       setMessage("");
+      setSentByTurn((prev) => ({ ...prev, [tid]: content }));
       pollTurn(sessionId, tid);
     } catch (e) {
       handleError(e);
@@ -223,73 +272,130 @@ function Harness() {
   };
 
   const running = turnStatus === "running";
+  const locked = !password;
+  const approvals = requiredActions.filter((a) => a.type === "tool.approval_required");
+  const hasStarted = events.length > 0 || approvals.length > 0;
 
   return (
-    <section className="harness">
-      <h2>Use the agent</h2>
+    <div className="chat-shell">
+      <div className="chat-header">
+        <header className="topbar">
+          <div className="wordmark">ROOLYTOOLY</div>
+          <div className="topbar-right">
+            {turnStatus && (
+              <span className="fine turn-status">
+                turn {shortId(turnId ?? "")} · {turnStatus}
+              </span>
+            )}
+            {!locked && (
+              <span className="lock-badge" title="unlocked for this tab">
+                🔓
+              </span>
+            )}
+            {sessionId ? (
+              <span className="session-pill">session {shortId(sessionId)}</span>
+            ) : (
+              <span className="session-pill dim">no session</span>
+            )}
+            <button className="new-session-btn" onClick={() => void newSession()} disabled={busy || locked}>
+              New session
+            </button>
+          </div>
+        </header>
 
-      <div className="harness-auth">
-        <input
-          type="password"
-          placeholder="harness password"
-          value={passwordDraft}
-          onChange={(e) => setPasswordDraft(e.target.value)}
-        />
-        <button onClick={savePassword} disabled={!passwordDraft}>Unlock</button>
-        {password && <span className="fine">password set for this tab</span>}
+        <PipelineStrip events={events} />
       </div>
 
-      {error && <p className="harness-error">{error}</p>}
+      <div className="chat-body">
+        <div className="chat-column">
+          {locked && (
+            <div className="msg-row system">
+              <div className="password-card">
+                <p className="password-card-title">Enter the harness password to unlock the agent.</p>
+                <div className="password-card-row">
+                  <input
+                    type="password"
+                    placeholder="harness password"
+                    value={passwordDraft}
+                    onChange={(e) => setPasswordDraft(e.target.value)}
+                  />
+                  <button onClick={savePassword} disabled={!passwordDraft}>
+                    Unlock
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
 
-      <div className="harness-controls">
-        <button onClick={() => void newSession()} disabled={busy || !password}>New session</button>
-        {sessionId && <span className="fine">session {sessionId}</span>}
-        {turnStatus && <span className="fine">turn {turnId} · {turnStatus}</span>}
+          {error && <p className="chat-error">{error}</p>}
+
+          {!locked && !sessionId && (
+            <p className="chat-empty">Start a new session, then send a message or pick a preset below.</p>
+          )}
+
+          {!locked && sessionId && !hasStarted && !running && (
+            <p className="chat-empty">Send a message or pick a preset below to begin.</p>
+          )}
+
+          <ChatFeed events={events} sentByTurn={sentByTurn} />
+
+          {approvals.flatMap((a) =>
+            (a.tool_calls ?? []).map((tc) => (
+              <div className="msg-row system" key={tc.id}>
+                <div className="approval-card">
+                  <div>
+                    Approval required — <code>{tc.function?.name ?? tc.id}</code> on thread {shortId(a.thread_id ?? "")}
+                  </div>
+                  <div className="approval-actions">
+                    <button onClick={() => void approve(a.thread_id ?? "", tc.id, true)} disabled={busy}>
+                      Approve
+                    </button>
+                    <button className="deny" onClick={() => void approve(a.thread_id ?? "", tc.id, false)} disabled={busy}>
+                      Deny
+                    </button>
+                  </div>
+                </div>
+              </div>
+            ))
+          )}
+        </div>
       </div>
 
-      {sessionId && (
-        <div className="harness-compose">
-          <textarea
-            value={message}
-            onChange={(e) => setMessage(e.target.value)}
-            placeholder="message the agent…"
-            rows={3}
-          />
-          <div className="harness-presets">
+      <div className="composer-bar">
+        <div className="composer-inner">
+          <div className="composer-presets">
             {PRESETS.map((p) => (
-              <button key={p.label} onClick={() => void send(p.text)} disabled={busy || running} title={p.text}>
+              <button
+                key={p.label}
+                className="preset-chip"
+                onClick={() => void send(p.text)}
+                disabled={busy || running || locked || !sessionId}
+                title={p.text}
+              >
                 {p.label}
               </button>
             ))}
-            <button onClick={() => void send(message)} disabled={busy || running || !message.trim()}>Send</button>
+          </div>
+          <div className="composer-row">
+            <textarea
+              className="composer-textarea"
+              value={message}
+              onChange={(e) => setMessage(e.target.value)}
+              placeholder="message the agent…"
+              rows={1}
+              disabled={locked || !sessionId}
+            />
+            <button
+              className="send-btn"
+              onClick={() => void send(message)}
+              disabled={busy || running || locked || !sessionId || !message.trim()}
+            >
+              Send
+            </button>
           </div>
         </div>
-      )}
-
-      <PipelineStrip events={events} />
-
-      {requiredActions
-        .filter((a) => a.type === "tool.approval_required")
-        .flatMap((a) =>
-          (a.tool_calls ?? []).map((tc) => (
-            <div className="approval-card" key={tc.id}>
-              <div>
-                Approval required — <code>{tc.function?.name ?? tc.id}</code> on thread {shortId(a.thread_id ?? "")}
-              </div>
-              <div className="approval-actions">
-                <button onClick={() => void approve(a.thread_id ?? "", tc.id, true)} disabled={busy}>Approve</button>
-                <button className="deny" onClick={() => void approve(a.thread_id ?? "", tc.id, false)} disabled={busy}>Deny</button>
-              </div>
-            </div>
-          ))
-        )}
-
-      <div className="harness-feed">
-        {events.map((row, i) => (
-          <EventRowView key={`${row.turn_id}-${i}`} row={row} />
-        ))}
       </div>
-    </section>
+    </div>
   );
 }
 
@@ -303,7 +409,7 @@ function PipelineStrip({ events }: { events: EventRow[] }) {
   }, [active]);
 
   return (
-    <div className="pipeline">
+    <div className="pipeline-bar">
       <div className="pipeline-strip">
         {PIPELINE_STEPS.map((s) => {
           const state = s.id === active ? "active" : done.has(s.id) ? "done" : "idle";
@@ -324,36 +430,109 @@ function PipelineStrip({ events }: { events: EventRow[] }) {
   );
 }
 
-function EventRowView({ row }: { row: EventRow }) {
+function ChatFeed({ events, sentByTurn }: { events: EventRow[]; sentByTurn: Record<string, string> }) {
+  const subAgentNames = useMemo(() => deriveSubAgentNames(events), [events]);
+  const seenTurns = new Set<string>();
+
+  return (
+    <>
+      {events.map((row, i) => {
+        const nodes = [];
+        if (!seenTurns.has(row.turn_id)) {
+          seenTurns.add(row.turn_id);
+          const text = sentByTurn[row.turn_id];
+          if (text) {
+            nodes.push(
+              <div className="msg-row user" key={`user-${row.turn_id}`}>
+                <div className="bubble user-bubble">
+                  <p>{text}</p>
+                </div>
+              </div>
+            );
+          }
+        }
+        nodes.push(<EventRowView key={`${row.turn_id}-${i}`} row={row} index={i} events={events} subAgentNames={subAgentNames} />);
+        return nodes;
+      })}
+    </>
+  );
+}
+
+function EventRowView({
+  row,
+  index,
+  events,
+  subAgentNames,
+}: {
+  row: EventRow;
+  index: number;
+  events: EventRow[];
+  subAgentNames: Map<string, string>;
+}) {
   const { event } = row;
   const isSub = Boolean(event.thread_id && event.thread_id !== "main");
 
   switch (event.type) {
-    case "model.message":
-      return (
-        <div className={isSub ? "feed-item sub" : "feed-item main"}>
-          {isSub && <span className="tag dim">subagent {shortId(event.thread_id ?? "")}</span>}
-          {event.content && <p>{event.content}</p>}
-          {(event.tool_calls ?? []).map((tc) => (
-            <div className="feed-tool" key={tc.id}>
-              {tc.function?.name ?? "tool"}({truncate(tc.function?.arguments ?? "", 120)})
+    case "model.message": {
+      const toolCalls = event.tool_calls ?? [];
+      if (!event.content && toolCalls.length === 0) return null;
+      const responses = collectResponses(events, index, toolCalls.length);
+      const chips = toolCalls.map((tc, k) => <ToolChip key={tc.id} tc={tc} response={responses[k]} />);
+
+      if (isSub) {
+        const name = subAgentNames.get(event.thread_id ?? "");
+        return (
+          <div className="msg-row sub">
+            <div className="bubble sub-bubble">
+              <div className="bubble-label">{name ? `subagent · ${name}` : "subagent"}</div>
+              {event.content && <p>{event.content}</p>}
+              {chips.length > 0 && <div className="tool-chips">{chips}</div>}
             </div>
-          ))}
+          </div>
+        );
+      }
+      return (
+        <div className="msg-row assistant">
+          <div className="bubble assistant-bubble">
+            {event.content && <p>{event.content}</p>}
+            {chips.length > 0 && <div className="tool-chips">{chips}</div>}
+          </div>
         </div>
       );
+    }
     case "tool.response":
-      return <div className="feed-item response">→ {truncate(event.content ?? "", 200)}</div>;
+      // Surfaced inside the originating tool chip's expanded view instead.
+      return null;
     case "thread.created":
-      return <div className="feed-item meta">thread created · {shortId(event.thread_id ?? "")}</div>;
+      return <div className="meta-row">thread created · {shortId(event.thread_id ?? "")}</div>;
     case "sandbox.created":
-      return <div className="feed-item meta">sandbox created</div>;
+      return <div className="meta-row">sandbox created</div>;
     case "turn.done":
-      return <div className="feed-item meta">turn done</div>;
+      return <div className="meta-row">turn done</div>;
     case "tool.approval_required":
-      return <div className="feed-item meta">approval requested</div>;
+      return <div className="meta-row">approval requested</div>;
     default:
       return null;
   }
+}
+
+function ToolChip({ tc, response }: { tc: ToolCall; response?: string }) {
+  const [open, setOpen] = useState(false);
+  const name = tc.function?.name ?? "tool";
+  const args = tc.function?.arguments ?? "";
+
+  return (
+    <div className={`tool-chip ${open ? "open" : ""}`} onClick={() => setOpen((o) => !o)}>
+      <code>
+        {name}({open ? args : truncate(args, 80)})
+      </code>
+      {open && (
+        <div className="tool-chip-response">
+          {response !== undefined ? `→ ${response}` : "→ (no response captured)"}
+        </div>
+      )}
+    </div>
+  );
 }
 
 export default Harness;
