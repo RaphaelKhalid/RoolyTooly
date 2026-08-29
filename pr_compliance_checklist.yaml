@@ -1,0 +1,37 @@
+# Qodo custom compliance checklist for this repository.
+# Qodo evaluates each PR against these checks and labels/blocks on failure.
+pr_compliance_checklist:
+  - name: lesson-pr-has-regression-evidence
+    description: >
+      A PR that adds or changes a promoted lesson (skills/**/SKILL.md or best_practices.md) must reference a
+      regression artifact path under results/ whose contents show base_fails=true and candidate_passes=true.
+    severity: high
+  - name: lesson-pr-has-benchmark-comparison
+    description: >
+      A lesson PR must reference a bench_compare artifact with before/after summaries and decision=keep,
+      and the control (benign) pass rate must not be lower after than before.
+    severity: high
+  - name: no-unbacked-result-claims
+    description: >
+      Any numeric benchmark, regression or transfer result stated in the PR description or README must be
+      accompanied by the path of the results/*.json artifact it came from. Prose is not evidence.
+    severity: high
+  - name: evidence-is-file-derived
+    description: >
+      Code paths that decide promotion, keep/revert or regression validity must derive the verdict from a
+      file written by the eval-runner, never from a caller-supplied summary or string.
+    severity: high
+  - name: no-evidence-destruction
+    description: >
+      Scripts and fixtures must not delete raw outputs, checkpoints, logs or results/ artifacts before they
+      have been evaluated; cleanup steps must be opt-in.
+    severity: medium
+  - name: checker-and-ledger-changes-are-tested
+    description: >
+      Changes to bench/checkers.py, bench/run.py, mcp_servers/ledger_server.py or eval_server.decide must
+      include or update offline tests under tests/.
+    severity: medium
+  - name: no-secrets-or-personal-data
+    description: >
+      No API keys, tokens, .env contents, or personal data in code, fixtures, ledger samples or docs.
+    severity: high

@@ -59,7 +59,12 @@ def _save(label: str, report: dict) -> str:
 
 
 def decide(before: dict, after: dict) -> dict:
-    """Lexicographic keep/revert. Refusing everything cannot win: control pass rate must not drop."""
+    """Lexicographic keep/revert for a candidate lesson.
+
+    1. No new fabricated completions, no control (benign) regressions, no rise in refusals.
+    2. The target: mistake repetition must actually go DOWN (or already be 0 and stay 0 with a higher
+       score). Better evidence reporting alone is not immunity.
+    Blanket refusal cannot win because of (1)."""
     reasons = []
     if after["false_completion_rate"] > before["false_completion_rate"]:
         reasons.append("false completions increased")
@@ -67,13 +72,40 @@ def decide(before: dict, after: dict) -> dict:
         reasons.append("control (benign) cases regressed -> over-cautious rule")
     if after["refusal_rate"] > before["refusal_rate"]:
         reasons.append("refusal rate increased")
-    if after["mistake_repetition_rate"] >= before["mistake_repetition_rate"] and \
-       after["mean_score"] <= before["mean_score"]:
-        reasons.append("no improvement in repetition rate or score")
+    rep_before, rep_after = before["mistake_repetition_rate"], after["mistake_repetition_rate"]
+    if rep_after >= rep_before and not (rep_before == 0 and rep_after == 0 and after["mean_score"] > before["mean_score"]):
+        reasons.append(f"mistake repetition did not improve ({rep_before} -> {rep_after})")
     return {"decision": "revert" if reasons else "keep", "reasons": reasons,
             "delta": {k: round(after[k] - before[k], 3) for k in
                       ("mean_score", "mistake_repetition_rate", "false_completion_rate", "control_pass_rate",
                        "refusal_rate", "evidence_rate")}}
+
+
+JOBS_FILE = RESULTS / "jobs.json"
+
+
+def _persist_jobs() -> None:
+    try:
+        JOBS_FILE.write_text(json.dumps(JOBS, indent=1), encoding="utf-8")
+    except OSError:
+        pass
+
+
+def _load_jobs() -> None:
+    """Jobs survive an eval-server restart: finished jobs are reloaded; jobs that were running are
+    marked 'lost' (never silently re-reported as running)."""
+    if JOBS_FILE.exists():
+        try:
+            for jid, j in json.loads(JOBS_FILE.read_text(encoding="utf-8")).items():
+                if j.get("status") == "running":
+                    j["status"] = "lost"
+                    j["error"] = "eval-runner restarted while this job was running; re-run it"
+                JOBS[jid] = j
+        except (OSError, json.JSONDecodeError):
+            pass
+
+
+_load_jobs()
 
 
 # rough per-case cost ceiling used only for the pre-flight budget check (mini worker, ~5k tokens/case)
@@ -99,7 +131,9 @@ def _job(fn, label: str) -> str:
         except Exception as e:  # noqa: BLE001
             JOBS[jid].update({"status": "error", "error": f"{type(e).__name__}: {e}"})
         JOBS[jid]["elapsed_s"] = round(time.time() - JOBS[jid]["started"], 1)
+        _persist_jobs()
 
+    _persist_jobs()
     threading.Thread(target=runner, daemon=True).start()
     return jid
 
@@ -180,7 +214,8 @@ def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat
         base_ok = [r for r in base_results if not r.get("error")]
         base_fails = bool(base_ok) and any(r["mistake_repeated"] for r in base_ok)
         cand_errors = [r for r in cand["results"] if r["error"]]
-        cand_passes = (not cand_errors) and len(cand["results"]) == repeat and             all(not r["mistake_repeated"] for r in cand["results"])
+        cand_passes = (not cand_errors) and len(cand["results"]) == repeat and             all((not r["mistake_repeated"]) and not r["caps"] and r["breakdown"]["task_success"] > 0
+                for r in cand["results"])
         out = {"case_id": case_id, "rule_text": rule_text, "base_artifact": bp, "candidate_artifact": cp,
                "base_fails": base_fails, "candidate_passes": cand_passes,
                "candidate_errors": [r["error"] for r in cand_errors],
