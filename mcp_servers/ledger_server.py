@@ -12,6 +12,7 @@ summary. `attach_evidence` opens the eval-runner artifact under results/ and der
 from __future__ import annotations
 
 import json
+import re
 import os
 import sys
 import threading
@@ -268,6 +269,51 @@ def get_active_lessons() -> dict:
             "lessons": [{"lesson_id": L["id"], "family": L["family"], "invariant": L["invariant"],
                          "rule_text": L["rule_text"], "intervention_type": L["intervention_type"]}
                         for L in active]}
+
+
+@mcp.tool(annotations=APPEND)
+def record_observation(source_url: str, quote: str, family: str, surface: str, causal_trap: str,
+                       proposed_case: str = "", confidence: float = 0.5) -> dict:
+    """Record one real-world agent mistake found on the web.
+
+    quote = verbatim excerpt (<=400 chars) from the scraped page; source_url = the http(s) page it
+    came from; family = Mxx or 'NEW:<name>'; surface = domain/wording; causal_trap = generalized
+    structure; proposed_case = one-line seeded-task idea with a deterministic check."""
+    fam_ok = family in FAMILIES or family.startswith("NEW:")
+    if not fam_ok:
+        return {"error": f"family must be one of {sorted(FAMILIES)} or 'NEW:<name>'"}
+    if not re.match(r"^https?://\S+$", source_url.strip()):
+        return {"error": "source_url must be an http(s) URL that was actually scraped"}
+    if len(quote.strip()) < 20:
+        return {"error": "quote must be a verbatim excerpt of at least 20 characters"}
+    rec = _append("observation", {"source_url": source_url, "quote": quote[:400], "family": family,
+                                  "surface": surface[:200], "causal_trap": causal_trap[:400],
+                                  "proposed_case": proposed_case[:400], "confidence": float(confidence)})
+    return {"observation_id": rec["id"]}
+
+
+@mcp.tool(annotations=READ)
+def observation_stats() -> dict:
+    """Summarize mined observations: counts per family and proposed cases."""
+    obs = []
+    with _LOCK:
+        lines = LOG.read_text(encoding="utf-8").splitlines() if LOG.exists() else []
+    for line in lines:
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(r, dict) and r.get("kind") == "observation" and isinstance(r.get("family"), str):
+            obs.append({"family": r["family"], "quote": str(r.get("quote", "")),
+                        "source_url": str(r.get("source_url", "")), "proposed_case": str(r.get("proposed_case", ""))})
+    per_family: dict[str, int] = {}
+    for o in obs:
+        per_family[o["family"]] = per_family.get(o["family"], 0) + 1
+    return {"total": len(obs), "per_family": dict(sorted(per_family.items(), key=lambda kv: -kv[1])),
+            "families_named": FAMILIES,
+            "proposed_cases": [{"family": o["family"], "case": o["proposed_case"], "source": o["source_url"]}
+                               for o in obs if o.get("proposed_case")][-20:],
+            "recent": [{"family": o["family"], "quote": o["quote"][:160], "source": o["source_url"]} for o in obs[-10:]]}
 
 
 @mcp.tool(annotations=READ)
