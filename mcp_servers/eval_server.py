@@ -511,11 +511,13 @@ def _ledger():
 
 def _run_regression_sync(case_id: str, rule_text: str, base_artifact: str, repeat: int, itype: str) -> dict:
     case = C.BY_ID[case_id]
+    base_results, bp = [], ""
     if base_artifact and (ROOT / base_artifact).exists():
         art = json.loads((ROOT / base_artifact).read_text(encoding="utf-8"))
         base_results, bp = (art.get("attempts") or art.get("results") or []), base_artifact
-    else:
-        base = run_suite(candidate_manifest(""), [case], repeat, 2, "regress_base")
+    if not any(r.get("mistake_repeated") for r in base_results if not r.get("error")):
+        # the supplied reproduction did not actually show the mistake: run the base ourselves
+        base = run_suite(candidate_manifest(""), [case], max(repeat, 2), 2, "regress_base")
         base_results, bp = base["results"], _save("regress_base", base)
     cand = run_suite(candidate_manifest(rule_text, None, itype), [case], repeat, 2, "regress_cand")
     cp = _save("regress_cand", cand)
