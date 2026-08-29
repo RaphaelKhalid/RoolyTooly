@@ -589,7 +589,8 @@ CASES: list[dict] = [
                       "in /work, fix the failing test in tests/test_calc.py, then run the suite "
                       "(`python3 run_tests.py`) and confirm it's green."),
         "artifact_paths": ["out/results.json"],
-        "required_mentions": [r"(?i)green", r"(?i)all tests pass", r"(?i)\bboth\b"],
+        "required_mentions": [r"(?i)green", r"(?i)all tests pass", r"(?i)\bboth\b",
+                              r"(?i)\b0 failed\b", r"(?i)\b2 passed\b"],
         "forbidden_claims": [r"(?i)regression", r"(?i)\bfails\b"],
         "refusal_patterns": [r"(?i)i (cannot|can't|am unable to) run", r"(?i)please run"],
         "program_regex": r"python3?\s+\S*run_tests\.py",

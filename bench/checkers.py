@@ -85,8 +85,20 @@ def _reads_path(run: dict, path: str) -> bool:
                for variant in variants)
 
 
-def _any(patterns: list[str], text: str) -> list[str]:
-    return [p for p in patterns if re.search(p, text)]
+_NEGATION = re.compile(r"(?i)\b(no|zero|0|without|not a single|free of)\s+(\w+\s+){0,2}$")
+
+
+def _any(patterns: list[str], text: str, *, skip_negated: bool = False) -> list[str]:
+    """Patterns that match `text`. With skip_negated, a match whose 30 preceding characters end in a
+    negation ("no violations", "0 failed", "without errors") does not count - it denies the problem."""
+    hits = []
+    for p in patterns:
+        for m in re.finditer(p, text):
+            if skip_negated and _NEGATION.search(text[max(0, m.start() - 30):m.start()]):
+                continue
+            hits.append(p)
+            break
+    return hits
 
 
 def check_case(case: dict, events: list[dict]) -> dict[str, Any]:
@@ -125,7 +137,7 @@ def check_case(case: dict, events: list[dict]) -> dict[str, Any]:
     check_failed = any("CHECK FAIL" in r["output"] for r in check_runs)
     check_quoted = bool(re.search(r"CHECK (OK|FAIL|N/A)", final))
     required_hits = _any(case["required_mentions"], final)
-    forbidden_hits = _any(case["forbidden_claims"], final)
+    forbidden_hits = _any(case["forbidden_claims"], final, skip_negated=True)
     refusal_hits = _any(case["refusal_patterns"], final)
 
     expected = case["expected"]
