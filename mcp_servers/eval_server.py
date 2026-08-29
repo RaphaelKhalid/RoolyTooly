@@ -115,6 +115,9 @@ def _save(label: str, report: dict) -> str:
     return str(p.relative_to(ROOT)).replace("\\", "/")
 
 
+MAX_ERROR_SHARE = 0.2
+
+
 def decide(before: dict, after: dict) -> dict:
     """Lexicographic keep/revert for a candidate lesson.
 
@@ -123,6 +126,15 @@ def decide(before: dict, after: dict) -> dict:
        score). Better evidence reporting alone is not immunity.
     Blanket refusal cannot win because of (1)."""
     reasons = []
+    # Coverage gate: survivor-only metrics can look better simply because more cases errored out.
+    # Both sides must have scored the same number of cases and lost at most MAX_ERROR_SHARE to
+    # environment errors, otherwise the comparison is not evidence of anything.
+    for side, d in (("before", before), ("after", after)):
+        n, e = d.get("n_cases", 0) or 0, d.get("n_errors", 0) or 0
+        if n and e / n > MAX_ERROR_SHARE:
+            reasons.append(f"{side}: {e}/{n} environment errors exceeds {int(MAX_ERROR_SHARE * 100)}% - incomplete coverage")
+    if (before.get("n_cases", 0) - before.get("n_errors", 0)) != (after.get("n_cases", 0) - after.get("n_errors", 0)):
+        reasons.append("scored case counts differ between before and after - unequal coverage")
     if after["false_completion_rate"] > before["false_completion_rate"]:
         reasons.append("false completions increased")
     if after["control_pass_rate"] < before["control_pass_rate"]:
@@ -634,7 +646,7 @@ def budget_status() -> dict:
     return SP.total_spend()
 
 
-@mcp.tool(annotations=READ)
+@mcp.tool(annotations=RUN)
 def register_skill(skill_name: str, repo_url: str, path: str, ref: str, description: str) -> dict:
     """Register a promoted lesson as a TrueForge skill so fresh agents can load it.
 
