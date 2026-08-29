@@ -147,23 +147,14 @@ function deriveSubAgentNames(events: EventRow[]): Map<string, string> {
   return names;
 }
 
-// Best-effort pairing of a model.message's tool_calls with the tool.response
-// events that immediately follow it in the stream, so a chip can show its
-// own response when expanded.
-function collectResponses(events: EventRow[], startIndex: number, count: number): (string | undefined)[] {
-  const out: (string | undefined)[] = [];
-  let i = startIndex + 1;
-  while (out.length < count && i < events.length) {
-    const ev = events[i].event;
-    if (ev.type === "tool.response") {
-      out.push(ev.content ?? undefined);
-    } else if (ev.type === "model.message") {
-      break;
-    }
-    i++;
+// Pair each tool call with its response by tool_call_id (never by adjacency).
+function collectResponses(events: EventRow[], _startIndex: number, toolCalls: { id: string }[]): (string | undefined)[] {
+  const byId = new Map<string, string | undefined>();
+  for (const row of events) {
+    const ev = row.event;
+    if (ev.type === "tool.response" && ev.tool_call_id) byId.set(ev.tool_call_id, ev.content ?? undefined);
   }
-  while (out.length < count) out.push(undefined);
-  return out;
+  return toolCalls.map((tc) => byId.get(tc.id));
 }
 
 function Harness() {
@@ -476,7 +467,7 @@ function EventRowView({
     case "model.message": {
       const toolCalls = event.tool_calls ?? [];
       if (!event.content && toolCalls.length === 0) return null;
-      const responses = collectResponses(events, index, toolCalls.length);
+      const responses = collectResponses(events, index, toolCalls);
       const chips = toolCalls.map((tc, k) => <ToolChip key={tc.id} tc={tc} response={responses[k]} />);
 
       if (isSub) {

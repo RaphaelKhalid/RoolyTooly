@@ -73,9 +73,11 @@ export type SessionEventType =
 
 export type SessionEvent = {
   type: SessionEventType;
+  id?: string;
   content?: string | null;
   thread_id?: string;
   tool_calls?: ToolCall[];
+  tool_call_id?: string; // on tool.response: the call this response answers
 };
 
 export type EventRow = {
