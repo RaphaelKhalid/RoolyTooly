@@ -108,16 +108,26 @@ def list_cases() -> dict:
 
 
 @mcp.tool(annotations=RUN)
-def run_worker(case_id: str, rule_text: str = "") -> dict:
+def run_worker(case_id: str, rule_text: str = "", reproduce_until_mistake: bool = True, max_attempts: int = 3) -> dict:
     """Run the plain WORKER agent (base manifest, optionally + rule_text) on one seeded case in a fresh
     sandboxed session and return what it claimed vs. what the deterministic checker found.
-    Synchronous (~20-60s). Use this to reproduce a mistake before compiling a lesson."""
+    With reproduce_until_mistake (default) it re-runs up to max_attempts fresh sessions until the checker
+    detects the family mistake; every attempt is kept in the artifact and reported (nothing hidden).
+    Synchronous (~30-90s)."""
     if case_id not in C.BY_ID:
         return {"error": f"unknown case {case_id}"}
-    rep = run_suite(candidate_manifest(rule_text), [C.BY_ID[case_id]], 1, 1, "worker")
-    p = _save("worker", rep)
-    r = rep["results"][0]
+    attempts = []
+    for i in range(max_attempts if reproduce_until_mistake else 1):
+        rep = run_suite(candidate_manifest(rule_text), [C.BY_ID[case_id]], 1, 1, "worker")
+        attempts.append(rep["results"][0])
+        if rep["results"][0]["mistake_repeated"] or not reproduce_until_mistake:
+            break
+    r = attempts[-1]
+    p = _save("worker", {"label": "worker", "case_id": case_id, "attempts": attempts,
+                         "summary": {"n_attempts": len(attempts),
+                                     "mistakes": sum(a["mistake_repeated"] for a in attempts)}})
     return {"artifact": p, "session_id": r["session_id"], "error": r["error"],
+            "attempts": len(attempts), "mistake_in_attempts": [a["mistake_repeated"] for a in attempts],
             "checker": {"score": r["score"], "mistake_detected": r["mistake_repeated"], "caps": r["caps"],
                         "artifact_inspected": r["signals"]["artifact_inspected"],
                         "required_hits": r["signals"]["required_hits"],
@@ -128,24 +138,35 @@ def run_worker(case_id: str, rule_text: str = "") -> dict:
 
 
 @mcp.tool(annotations=RUN)
-def run_regression(case_id: str, rule_text: str, repeat: int = 1) -> dict:
-    """Regression test for a candidate rule: run `case_id` with the BASE manifest and with the
-    CANDIDATE manifest (base + rule_text). Returns a job id; poll get_job. A valid regression test
-    is one the base agent FAILS (mistake_repeated=true) and the candidate PASSES."""
+def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat: int = 2) -> dict:
+    """Regression test for a candidate rule on `case_id`.
+    BASE side: the reproduced failure from run_worker (pass its artifact path) — that IS the regression
+    case; if omitted, the base manifest is run `repeat` times and fails if any run makes the mistake.
+    CANDIDATE side: base + rule_text run `repeat` times; must pass every run.
+    Returns a job id; poll get_job. valid_regression_test = base_fails AND candidate_passes."""
     if case_id not in C.BY_ID:
         return {"error": f"unknown case {case_id}"}
     case = C.BY_ID[case_id]
 
     def work():
-        base = run_suite(load_manifest(BASE_MANIFEST), [case], repeat, 2, "regress_base")
+        if base_artifact and (ROOT / base_artifact).exists():
+            art = json.loads((ROOT / base_artifact).read_text(encoding="utf-8"))
+            base_results = art.get("attempts") or art.get("results") or []
+            bp = base_artifact
+        else:
+            base = run_suite(load_manifest(BASE_MANIFEST), [case], repeat, 2, "regress_base")
+            base_results, bp = base["results"], _save("regress_base", base)
         cand = run_suite(candidate_manifest(rule_text), [case], repeat, 2, "regress_cand")
-        bp, cp = _save("regress_base", base), _save("regress_cand", cand)
-        base_fails = any(r["mistake_repeated"] for r in base["results"] if not r["error"])
-        cand_passes = all(not r["mistake_repeated"] for r in cand["results"] if not r["error"])
+        cp = _save("regress_cand", cand)
+        base_fails = any(r["mistake_repeated"] for r in base_results if not r.get("error"))
+        cand_ok = [r for r in cand["results"] if not r["error"]]
+        cand_passes = bool(cand_ok) and all(not r["mistake_repeated"] for r in cand_ok)
         return {"case_id": case_id, "base_artifact": bp, "candidate_artifact": cp,
                 "base_fails": base_fails, "candidate_passes": cand_passes,
                 "valid_regression_test": base_fails and cand_passes,
-                "base": _slim(base), "candidate": _slim(cand)}
+                "base_runs": [{"mistake": r["mistake_repeated"], "score": r["score"], "session_id": r["session_id"],
+                               "claim": r["final_message"][:200]} for r in base_results],
+                "candidate": _slim(cand)}
 
     return {"job_id": _job(work, f"regression:{case_id}")}
 
@@ -191,11 +212,15 @@ def run_transfer(case_id: str, skill_name: str = "", rule_text: str = "") -> dic
 
 
 @mcp.tool(annotations=READ)
-def get_job(job_id: str) -> dict:
-    """Poll a running evaluation job. status: running | done | error."""
+def get_job(job_id: str, wait_s: int = 45) -> dict:
+    """Poll a running evaluation job. Blocks server-side up to wait_s seconds (default 45) so one call is
+    usually enough; call again if status is still 'running'. status: running | done | error."""
     j = JOBS.get(job_id)
     if not j:
         return {"error": "unknown job"}
+    deadline = time.time() + max(0, min(wait_s, 55))
+    while j["status"] == "running" and time.time() < deadline:
+        time.sleep(1)
     if j["status"] == "running":
         return {"job_id": job_id, "status": "running", "label": j["label"],
                 "elapsed_s": round(time.time() - j["started"], 1)}

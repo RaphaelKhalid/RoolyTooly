@@ -35,10 +35,11 @@ def check_case(case: dict, events: list[dict]) -> dict[str, Any]:
 
     setup_ran = any(SETUP_MARKER in cmd for cmd in cmds)
     ran_program = any(re.search(r"python3?\s+\S*(build_report|pipeline)\.py", cmd) for cmd in cmds)
+    # An inspection is a READ of the artifact (cat/head/wc/jq/python -c/ls -l ...), wherever it appears in
+    # the command — chained after setup or the build is fine. Writing it (the fixture heredoc) is not.
+    read_re = r"\b(cat|head|tail|wc|jq|sed|grep|stat|ls|python3?\s+-c|json\.load|open\()\b[^\n;|&]*"
     inspected = [p for p in case["artifact_paths"]
-                 if any(p in cmd and SETUP_MARKER not in cmd and not re.search(r"python3?\s+\S*(build_report|pipeline)\.py\s*$", cmd.strip())
-                        for cmd in cmds)]
-    # an inspection must be a read of the artifact (cat/head/wc/jq/python -c/ls -l ...) not the build itself
+                 if any(re.search(read_re + re.escape(p), cmd) for cmd in cmds)]
     artifact_inspected = bool(inspected)
 
     required_hits = _any(case["required_mentions"], final)

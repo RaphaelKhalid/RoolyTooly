@@ -43,6 +43,67 @@ def env_error(events: list[dict]) -> str | None:
     return None
 
 
+def _daytona_key() -> str | None:
+    key = os.environ.get("DAYTONA_API_KEY")
+    env = ROOT / ".env"
+    if not key and env.exists():
+        for line in env.read_text().splitlines():
+            if line.startswith("DAYTONA_API_KEY="):
+                key = line.split("=", 1)[1].strip().strip('"')
+    return key
+
+
+def _daytona(method: str, path: str):
+    import urllib.request
+    key = _daytona_key()
+    if not key:
+        return None
+    req = urllib.request.Request(f"https://app.daytona.io/api{path}", method=method,
+                                 headers={"Authorization": f"Bearer {key}"})
+    try:
+        body = urllib.request.urlopen(req, timeout=30).read()
+        return json.loads(body) if body else {}
+    except Exception:  # noqa: BLE001
+        return None
+
+
+def purge_sandboxes(only_idle: bool = True) -> int:
+    """Daytona free tier = 10 live sandboxes (10 CPU / 30 GiB). TrueForge's event sandbox_id is not the
+    Daytona id, so we clean by state: idle (stopped/archived) sandboxes are never in use. Best effort."""
+    sb = _daytona("GET", "/sandbox")
+    if sb is None:
+        return 0
+    items = sb if isinstance(sb, list) else (sb.get("items") or sb.get("data") or [])
+    n = 0
+    for s in items:
+        if only_idle and s.get("state") not in ("stopped", "archived", "error", "build_failed"):
+            continue
+        if _daytona("DELETE", f"/sandbox/{s['id']}?force=true") is not None:
+            n += 1
+    return n
+
+
+WARMUP = (
+    "Run exactly this command in the sandbox (multi-line, as ONE exec call) and reply with just: ok\n"
+    "```bash\ncat <<'EOF' > /tmp/warmup.txt\nwarmup\nEOF\ncat /tmp/warmup.txt\n```"
+)
+
+
+def warm_sandbox(sid: str, tries: int = 2) -> bool:
+    """Some Daytona sandboxes reject multi-line/heredoc execs with `fork/exec /usr/bin/bash: no such
+    file` (per-sandbox, not a boot race). Probe with a heredoc in a throwaway turn; if the sandbox is
+    broken the caller abandons the session before spending the graded turn."""
+    for i in range(tries):
+        try:
+            turn = tf.run_turn(sid, WARMUP, timeout_s=120)
+            if not env_error(tf.turn_events(sid, turn["id"])):
+                return True
+        except Exception:  # noqa: BLE001
+            pass
+        time.sleep(4)
+    return False
+
+
 def run_one(case: dict, manifest: dict, timeout_s: float = 420, retries: int = 2) -> dict:
     t0 = time.time()
     attempts = 0
@@ -51,11 +112,18 @@ def run_one(case: dict, manifest: dict, timeout_s: float = 420, retries: int = 2
         sid = tf.create_session(spec=manifest)
         err = None
         turn = None
+        if not warm_sandbox(sid):
+            if attempts <= retries:
+                print(f"  [env-err] {case['id']} attempt {attempts}: broken sandbox at warm-up -> new session", flush=True)
+                continue
         try:
             turn = tf.run_turn(sid, case["task"], timeout_s=timeout_s)
         except Exception as e:  # noqa: BLE001
             err = f"{type(e).__name__}: {e}"
         events = tf.session_events(sid)
+        if turn:  # grade only the task turn, not the warm-up turn(s)
+            events = [e for e in events if e.get("_turn_id") == turn["id"]]
+        purge_sandboxes(only_idle=True)
         env = env_error(events)
         if env and attempts <= retries:
             print(f"  [env-err] {case['id']} attempt {attempts}: {env[:80]} -> retrying", flush=True)
@@ -93,6 +161,7 @@ def summarize(results: list[dict]) -> dict:
 def run_suite(manifest: dict, cases: list[dict], repeat: int = 1, parallel: int = 3, label: str = "") -> dict:
     jobs = [c for c in cases for _ in range(repeat)]
     results: list[dict] = []
+    purge_sandboxes(only_idle=True)
     with cf.ThreadPoolExecutor(max_workers=parallel) as ex:
         for r in ex.map(lambda c: run_one(c, manifest), jobs):
             results.append(r)

@@ -67,7 +67,7 @@ def list_agents() -> list[dict]:
 def upsert_agent(name: str, spec: dict) -> dict:
     existing = {a["name"]: a for a in list_agents()}
     if name in existing:
-        return _req("PUT", f"/agents/{existing[name]['id']}", {"name": name, "manifest": spec})["data"]
+        return _req("PUT", f"/agents/{existing[name]['id']}", {"manifest": spec})["data"]
     return _req("POST", "/agents", {"name": name, "manifest": spec})["data"]
 
 
