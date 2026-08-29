@@ -23,8 +23,14 @@ def main():
     root = sys.argv[1] if len(sys.argv) > 1 else "."
     files = sorted(glob.glob(os.path.join(root, "tests", "test_*.py")))
     failures = []
+    runner_code = (
+        "import importlib.util,sys,traceback;spec=importlib.util.spec_from_file_location('t',sys.argv[1]);"
+        "m=importlib.util.module_from_spec(spec);sys.path.insert(0,'.');spec.loader.exec_module(m);"
+        "fns=[getattr(m,n) for n in dir(m) if n.startswith('test_') and callable(getattr(m,n))];bad=0\n"
+        "for fn in fns:\n    try: fn()\n    except Exception as e: bad+=1; print('FAIL', fn.__name__, type(e).__name__, e)\n"
+        "print('RAN', len(fns), 'FAILED', bad); sys.exit(1 if bad or not fns else 0)")
     for f in files:
-        code, out = run([sys.executable, f], root)
+        code, out = run([sys.executable, "-c", runner_code, f], root)  # runs every test_* function, pytest-free
         if code != 0:
             failures.append(f"{os.path.relpath(f, root)} exit {code}: {out.strip().splitlines()[-1] if out.strip() else ''}")
     runner = os.path.join(root, "run_tests.py")
@@ -32,8 +38,8 @@ def main():
     if os.path.exists(runner):
         code, out = run([sys.executable, runner, "--all"], root)
         runner_note = f" | run_tests.py --all exit {code}: {out.strip().splitlines()[-1] if out.strip() else ''}"
-        if "FAIL" in out.upper() and "PASS" in out.upper() and code == 0:
-            failures.append("run_tests.py --all reports at least one failing file")
+        if code != 0 or ("FAIL" in out.upper() and "PASS" in out.upper()):
+            failures.append(f"run_tests.py --all did not pass cleanly (exit {code})")
     if not files and not runner_note:
         print("CHECK N/A no tests/ directory found - this check does not apply; it says nothing about whether the task is done.")
         return

@@ -297,7 +297,7 @@ def run_worker(case_id: str, rule_text: str = "", reproduce_until_mistake: bool 
 
 @mcp.tool(annotations=RUN)
 def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat: int = 2,
-                   intervention_type: str = "rule") -> dict:
+                   intervention_type: str = "rule", check_script: str = "") -> dict:
     """Regression test for a candidate rule on `case_id`.
     BASE side: the reproduced failure from run_worker (pass its artifact path) — that IS the regression
     case; if omitted, the base manifest is run `repeat` times and fails if any run makes the mistake.
@@ -306,6 +306,8 @@ def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat
     evidence schema). Returns a job id; poll get_job. valid_regression_test = base_fails AND candidate_passes."""
     if intervention_type not in INTERVENTIONS:
         return {"error": f"intervention_type must be one of {INTERVENTIONS}"}
+    if intervention_type == "check" and not check_script:
+        return {"error": "check interventions need check_script (a name under bench/checks/ or python source)"}
     if case_id not in C.BY_ID:
         return {"error": f"unknown case {case_id}"}
     if repeat < 1:
@@ -322,7 +324,7 @@ def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat
         else:
             base = run_suite(candidate_manifest(""), [case], repeat, 2, "regress_base")
             base_results, bp = base["results"], _save("regress_base", base)
-        cand = run_suite(candidate_manifest(rule_text, None, intervention_type), [case], repeat, 2, "regress_cand")
+        cand = run_suite(candidate_manifest(rule_text, None, intervention_type, check_script), [case], repeat, 2, "regress_cand")
         cp = _save("regress_cand", cand)
         base_ok = [r for r in base_results if not r.get("error")]
         base_fails = bool(base_ok) and any(r["mistake_repeated"] for r in base_ok)
@@ -344,7 +346,8 @@ def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat
 
 
 @mcp.tool(annotations=RUN)
-def run_benchmark(rule_text: str, split: str = "", repeat: int = 1, intervention_type: str = "rule") -> dict:
+def run_benchmark(rule_text: str, split: str = "", repeat: int = 1, intervention_type: str = "rule",
+                  check_script: str = "") -> dict:
     """Autoresearch step: run the benchmark before and after applying rule_text.
 
     Default cases: holdout + control. BEFORE uses the base manifest; AFTER uses base + rule_text.
@@ -365,7 +368,7 @@ def run_benchmark(rule_text: str, split: str = "", repeat: int = 1, intervention
 
     def work():
         before = run_suite(candidate_manifest(""), cases, repeat, 2, "bench_before")
-        after = run_suite(candidate_manifest(rule_text, None, intervention_type), cases, repeat, 2, "bench_after")
+        after = run_suite(candidate_manifest(rule_text, None, intervention_type, check_script), cases, repeat, 2, "bench_after")
         bp, ap = _save("bench_before", before), _save("bench_after", after)
         d = decide(before["summary"], after["summary"])
         comp = {"before_artifact": bp, "after_artifact": ap, "before": before["summary"],
@@ -457,9 +460,15 @@ def lessons_for_case(case_id: str, lessons: list[dict]) -> list[dict]:
     if not LESSON_INDEX.exists():
         return lessons
     try:
-        idx = json.loads(LESSON_INDEX.read_text(encoding="utf-8")).get("index", {})
+        doc = json.loads(LESSON_INDEX.read_text(encoding="utf-8"))
+        idx = doc.get("index", {})
     except (OSError, json.JSONDecodeError):
         return lessons
+    # stale index (ledger changed since selection) -> deterministic fallback: all active lessons
+    if doc.get("ledger_hash") and LEDGER_LOG.exists():
+        import hashlib
+        if hashlib.sha256(LEDGER_LOG.read_text(encoding="utf-8").encode("utf-8")).hexdigest()[:16] != doc["ledger_hash"]:
+            return lessons
     if case_id not in idx or idx[case_id] is None:  # unknown retrieval -> deterministic fallback: all active
         return lessons
     wanted = set(idx[case_id])
