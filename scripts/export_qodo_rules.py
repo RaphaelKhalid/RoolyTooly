@@ -8,11 +8,11 @@ every PR. Running this after a promotion means what the agent learned is also en
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-import os
 LEDGER = Path(os.environ.get("ROOLY_LEDGER_DIR", ROOT / "ledger")) / "ledger.jsonl"
 OUT = ROOT / "best_practices.md"
 
