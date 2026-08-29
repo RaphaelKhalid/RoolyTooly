@@ -43,6 +43,21 @@ RUN = ToolAnnotations(readOnlyHint=False, destructiveHint=False, idempotentHint=
 JOBS: dict[str, dict] = {}
 
 
+WORKER_MODEL_FILE = RESULTS / "worker_model.json"
+DEFAULT_WORKER_MODEL = {"name": "openai/gpt-5-6-luna", "params": {"reasoning_effort": "high"}}
+
+
+def worker_model() -> dict:
+    """The model every worker/candidate/transfer run uses. luna-high is the floor (what people actually
+    run for agentic SWE); gpt-5-4-mini reproduces the easy-family mistakes for the demo."""
+    if WORKER_MODEL_FILE.exists():
+        try:
+            return json.loads(WORKER_MODEL_FILE.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            pass
+    return DEFAULT_WORKER_MODEL
+
+
 INTERVENTIONS = ("rule", "seed", "constraint")
 EVIDENCE_SCHEMA = {
     "type": "object", "additionalProperties": False,
@@ -66,6 +81,7 @@ def candidate_manifest(rule_text: str, skill_name: str | None = None, interventi
     that forces the worker to list the evidence it read and disclose regeneration - the checker
     verifies those paths against the trace."""
     m = copy.deepcopy(load_manifest(BASE_MANIFEST))
+    m["model"] = worker_model()
     if rule_text and intervention_type in ("rule", "constraint"):
         m["instructions"] = m["instructions"].rstrip() + "\n\n## Learned lessons (active)\n- " + rule_text.strip()
     if rule_text and intervention_type == "seed":
@@ -135,7 +151,7 @@ _load_jobs()
 
 
 # rough per-case cost ceiling used only for the pre-flight budget check (mini worker, ~5k tokens/case)
-EST_USD_PER_CASE = 0.03
+EST_USD_PER_CASE = 0.03  # luna-high ~8k tokens/case at $0.20/$1.20 stays under this
 
 
 def budget_guard(n_cases: int) -> dict | None:
@@ -238,7 +254,7 @@ def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat
             base_results = art.get("attempts") or art.get("results") or []
             bp = base_artifact
         else:
-            base = run_suite(load_manifest(BASE_MANIFEST), [case], repeat, 2, "regress_base")
+            base = run_suite(candidate_manifest(""), [case], repeat, 2, "regress_base")
             base_results, bp = base["results"], _save("regress_base", base)
         cand = run_suite(candidate_manifest(rule_text, None, intervention_type), [case], repeat, 2, "regress_cand")
         cp = _save("regress_cand", cand)
@@ -280,7 +296,7 @@ def run_benchmark(rule_text: str, split: str = "", repeat: int = 1, intervention
         return g
 
     def work():
-        before = run_suite(load_manifest(BASE_MANIFEST), cases, repeat, 3, "bench_before")
+        before = run_suite(candidate_manifest(""), cases, repeat, 3, "bench_before")
         after = run_suite(candidate_manifest(rule_text, None, intervention_type), cases, repeat, 3, "bench_after")
         bp, ap = _save("bench_before", before), _save("bench_after", after)
         d = decide(before["summary"], after["summary"])
@@ -336,6 +352,14 @@ def get_artifact(path: str, max_chars: int = 20000) -> dict:
         return {"error": f"not a results/ artifact: {path}"}
     text = p.read_text(encoding="utf-8")
     return {"path": path, "truncated": len(text) > max_chars, "content": text[:max_chars]}
+
+
+@mcp.tool(annotations=RUN)
+def set_worker_model(model: str = "openai/gpt-5-6-luna", reasoning_effort: str = "high") -> dict:
+    """Set the model used by ALL worker/base/candidate/transfer runs from now on. Default luna-high.
+    Use openai/gpt-5-4-mini + low to reproduce the easy-family mistakes for a demo."""
+    WORKER_MODEL_FILE.write_text(json.dumps({"name": model, "params": {"reasoning_effort": reasoning_effort}}), encoding="utf-8")
+    return {"worker_model": worker_model()}
 
 
 @mcp.tool(annotations=READ)
