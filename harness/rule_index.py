@@ -73,12 +73,15 @@ class LessonIndex:
         rank_bm = {i: r for r, (i, _) in enumerate(sorted(enumerate(bm), key=lambda x: -x[1]))}
         rank_ng = {i: r for r, (i, _) in enumerate(sorted(enumerate(ng), key=lambda x: -x[1]))}
         k = 60.0
-        fused = [(1 / (k + rank_bm[i]) + 1 / (k + rank_ng[i])) * (1 if (bm[i] > 0 or ng[i] > 0.05) else 0)
+        # absolute relevance gate: RRF ranks are relative, so a lesson must also show real lexical
+        # evidence (BM25 >= 1.0 or char-3gram cosine >= 0.12) before it can be selected at all
+        fused = [(1 / (k + rank_bm[i]) + 1 / (k + rank_ng[i])) * (1 if (bm[i] >= 2.0 or ng[i] >= 0.18) else 0)
                  for i in range(len(self.lessons))]
         by_fam: dict[str, float] = defaultdict(float)
         for i, L in enumerate(self.lessons):
             by_fam[L.get("family", "")] = max(by_fam[L.get("family", "")], fused[i])
-        out = [(fused[i] + 0.25 * by_fam[L.get("family", "")], L) for i, L in enumerate(self.lessons)]
+        # the family hop only reinforces lessons that matched on their own; it never resurrects a zero
+        out = [((fused[i] + 0.25 * by_fam[L.get("family", "")]) if fused[i] > 0 else 0.0, L) for i, L in enumerate(self.lessons)]
         return sorted(out, key=lambda x: -x[0])
 
     def _bm25(self, query: str) -> list[float]:
