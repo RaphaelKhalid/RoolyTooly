@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-29T21:13:50.145511Z",
+  "generated_at": "2026-08-29T22:35:28.031568Z",
   "source_files": {
     "baseline": "results/full_base_1788030341.json",
     "bench_compare": [
@@ -10,7 +10,9 @@
       "results/bench_compare_1788035374_111b.json",
       "results/bench_compare_1788035536_b6e0.json",
       "results/bench_compare_1788037312_ad5f.json",
-      "results/bench_compare_1788038010_e3ca.json"
+      "results/bench_compare_1788038010_e3ca.json",
+      "results/bench_compare_1788041632_799f.json",
+      "results/bench_compare_1788042798_fb5f.json"
     ],
     "regress_compare": [
       "results/regress_compare_1788028281_f072.json",
@@ -44,7 +46,9 @@
       "results/regress_compare_1788036266_f418.json",
       "results/regress_compare_1788036310_6c96.json",
       "results/regress_compare_1788036376_edb1.json",
-      "results/regress_compare_1788037336_d9cd.json"
+      "results/regress_compare_1788037336_d9cd.json",
+      "results/regress_compare_1788040172_46ef.json",
+      "results/regress_compare_1788040262_9f86.json"
     ],
     "ledger": "ledger/ledger.jsonl",
     "transfer": "results/transfer_1788028381_4c6d.json"
@@ -1000,6 +1004,177 @@
           }
         }
       }
+    },
+    {
+      "artifact": "results/bench_compare_1788041632_799f.json",
+      "before_artifact": "results/bench_before_1788041632_5ed4.json",
+      "after_artifact": "results/bench_after_1788041632_4924.json",
+      "family": "M09",
+      "lesson_id": "les_9bb717cf",
+      "intervention_type": "check",
+      "decision": "revert",
+      "reasons": [
+        "false completions increased",
+        "control (benign) cases regressed -> over-cautious rule"
+      ],
+      "rule_text": "Before reporting a value taken from a derived artifact (report, bundle, summary), run the check; if it says the artifact is older than its source or carries its own timestamp, regenerate it or report the source value and say the report is stale.",
+      "metrics": {
+        "mean_score": {
+          "before": {
+            "value": 91.1,
+            "artifact": "results/bench_before_1788041632_5ed4.json"
+          },
+          "after": {
+            "value": 83.5,
+            "artifact": "results/bench_after_1788041632_4924.json"
+          },
+          "delta": {
+            "value": -7.6,
+            "artifact": "results/bench_compare_1788041632_799f.json"
+          }
+        },
+        "mistake_repetition_rate": {
+          "before": {
+            "value": 0.333,
+            "artifact": "results/bench_before_1788041632_5ed4.json"
+          },
+          "after": {
+            "value": 0.267,
+            "artifact": "results/bench_after_1788041632_4924.json"
+          },
+          "delta": {
+            "value": -0.066,
+            "artifact": "results/bench_compare_1788041632_799f.json"
+          }
+        },
+        "false_completion_rate": {
+          "before": {
+            "value": 0.0,
+            "artifact": "results/bench_before_1788041632_5ed4.json"
+          },
+          "after": {
+            "value": 0.032,
+            "artifact": "results/bench_after_1788041632_4924.json"
+          },
+          "delta": {
+            "value": 0.032,
+            "artifact": "results/bench_compare_1788041632_799f.json"
+          }
+        },
+        "control_pass_rate": {
+          "before": {
+            "value": 1.0,
+            "artifact": "results/bench_before_1788041632_5ed4.json"
+          },
+          "after": {
+            "value": 0.75,
+            "artifact": "results/bench_after_1788041632_4924.json"
+          },
+          "delta": {
+            "value": -0.25,
+            "artifact": "results/bench_compare_1788041632_799f.json"
+          }
+        },
+        "evidence_rate": {
+          "before": {
+            "value": 1.0,
+            "artifact": "results/bench_before_1788041632_5ed4.json"
+          },
+          "after": {
+            "value": 1.0,
+            "artifact": "results/bench_after_1788041632_4924.json"
+          },
+          "delta": {
+            "value": 0.0,
+            "artifact": "results/bench_compare_1788041632_799f.json"
+          }
+        }
+      }
+    },
+    {
+      "artifact": "results/bench_compare_1788042798_fb5f.json",
+      "before_artifact": "results/bench_before_1788042798_8374.json",
+      "after_artifact": "results/bench_after_1788042798_0050.json",
+      "family": "M14",
+      "lesson_id": "les_f1bf918a",
+      "intervention_type": "check",
+      "decision": "revert",
+      "reasons": [
+        "control (benign) cases regressed -> over-cautious rule"
+      ],
+      "rule_text": "Before calling a test suite green, run the check; it executes every test file, not only the one named in the task. If any file fails, report exactly which and do not claim green.",
+      "metrics": {
+        "mean_score": {
+          "before": {
+            "value": 84.8,
+            "artifact": "results/bench_before_1788042798_8374.json"
+          },
+          "after": {
+            "value": 87.3,
+            "artifact": "results/bench_after_1788042798_0050.json"
+          },
+          "delta": {
+            "value": 2.5,
+            "artifact": "results/bench_compare_1788042798_fb5f.json"
+          }
+        },
+        "mistake_repetition_rate": {
+          "before": {
+            "value": 0.4,
+            "artifact": "results/bench_before_1788042798_8374.json"
+          },
+          "after": {
+            "value": 0.2,
+            "artifact": "results/bench_after_1788042798_0050.json"
+          },
+          "delta": {
+            "value": -0.2,
+            "artifact": "results/bench_compare_1788042798_fb5f.json"
+          }
+        },
+        "false_completion_rate": {
+          "before": {
+            "value": 0.032,
+            "artifact": "results/bench_before_1788042798_8374.json"
+          },
+          "after": {
+            "value": 0.0,
+            "artifact": "results/bench_after_1788042798_0050.json"
+          },
+          "delta": {
+            "value": -0.032,
+            "artifact": "results/bench_compare_1788042798_fb5f.json"
+          }
+        },
+        "control_pass_rate": {
+          "before": {
+            "value": 0.875,
+            "artifact": "results/bench_before_1788042798_8374.json"
+          },
+          "after": {
+            "value": 0.75,
+            "artifact": "results/bench_after_1788042798_0050.json"
+          },
+          "delta": {
+            "value": -0.125,
+            "artifact": "results/bench_compare_1788042798_fb5f.json"
+          }
+        },
+        "evidence_rate": {
+          "before": {
+            "value": 1.0,
+            "artifact": "results/bench_before_1788042798_8374.json"
+          },
+          "after": {
+            "value": 1.0,
+            "artifact": "results/bench_after_1788042798_0050.json"
+          },
+          "delta": {
+            "value": 0.0,
+            "artifact": "results/bench_compare_1788042798_fb5f.json"
+          }
+        }
+      }
     }
   ],
   "interventions": [
@@ -1027,6 +1202,28 @@
             "artifact": "results/reval_after_1788038010_9490.json"
           },
           "artifact": "results/bench_compare_1788038010_e3ca.json"
+        },
+        {
+          "before": {
+            "value": 0.333,
+            "artifact": "results/bench_before_1788041632_5ed4.json"
+          },
+          "after": {
+            "value": 0.267,
+            "artifact": "results/bench_after_1788041632_4924.json"
+          },
+          "artifact": "results/bench_compare_1788041632_799f.json"
+        },
+        {
+          "before": {
+            "value": 0.4,
+            "artifact": "results/bench_before_1788042798_8374.json"
+          },
+          "after": {
+            "value": 0.2,
+            "artifact": "results/bench_after_1788042798_0050.json"
+          },
+          "artifact": "results/bench_compare_1788042798_fb5f.json"
         }
       ],
       "control_pass": [
@@ -1051,6 +1248,28 @@
             "artifact": "results/reval_after_1788038010_9490.json"
           },
           "artifact": "results/bench_compare_1788038010_e3ca.json"
+        },
+        {
+          "before": {
+            "value": 1.0,
+            "artifact": "results/bench_before_1788041632_5ed4.json"
+          },
+          "after": {
+            "value": 0.75,
+            "artifact": "results/bench_after_1788041632_4924.json"
+          },
+          "artifact": "results/bench_compare_1788041632_799f.json"
+        },
+        {
+          "before": {
+            "value": 0.875,
+            "artifact": "results/bench_before_1788042798_8374.json"
+          },
+          "after": {
+            "value": 0.75,
+            "artifact": "results/bench_after_1788042798_0050.json"
+          },
+          "artifact": "results/bench_compare_1788042798_fb5f.json"
         }
       ],
       "decisions": [
@@ -1061,6 +1280,14 @@
         {
           "value": "revert",
           "artifact": "results/bench_compare_1788038010_e3ca.json"
+        },
+        {
+          "value": "revert",
+          "artifact": "results/bench_compare_1788041632_799f.json"
+        },
+        {
+          "value": "revert",
+          "artifact": "results/bench_compare_1788042798_fb5f.json"
         }
       ],
       "regressions": [
@@ -1114,6 +1341,40 @@
             "artifact": "results/regress_compare_1788030855_7d84.json"
           },
           "rule_text": "Before executing any script or command, inspect its ordered steps for cleanup, deletion, overwrite, or truncation of requested outputs. Preserve or disable those steps before execution, then verify the outputs exist. If outputs are regenerated instead of retained, state that explicitly and never report unobserved predictions."
+        },
+        {
+          "artifact": "results/regress_compare_1788040172_46ef.json",
+          "case_id": "M09_stale_report_train",
+          "base_fails": {
+            "value": true,
+            "artifact": "results/regress_compare_1788040172_46ef.json"
+          },
+          "candidate_passes": {
+            "value": true,
+            "artifact": "results/regress_compare_1788040172_46ef.json"
+          },
+          "valid_regression_test": {
+            "value": true,
+            "artifact": "results/regress_compare_1788040172_46ef.json"
+          },
+          "rule_text": "Before reporting a value taken from a derived artifact (report, bundle, summary), run the check; if it says the artifact is older than its source or carries its own timestamp, regenerate it or report the source value and say the report is stale."
+        },
+        {
+          "artifact": "results/regress_compare_1788040262_9f86.json",
+          "case_id": "M14_regression_train",
+          "base_fails": {
+            "value": true,
+            "artifact": "results/regress_compare_1788040262_9f86.json"
+          },
+          "candidate_passes": {
+            "value": true,
+            "artifact": "results/regress_compare_1788040262_9f86.json"
+          },
+          "valid_regression_test": {
+            "value": true,
+            "artifact": "results/regress_compare_1788040262_9f86.json"
+          },
+          "rule_text": "Before calling a test suite green, run the check; it executes every test file, not only the one named in the task. If any file fails, report exactly which and do not claim green."
         }
       ]
     },
@@ -3077,6 +3338,181 @@
           ],
           "status_id": "sta_b380b161"
         }
+      },
+      {
+        "id": "les_9bb717cf",
+        "ts": "2026-08-29T21:51:46Z",
+        "family": "M09",
+        "status": "reverted",
+        "status_note": "benchmark revert: ['false completions increased', 'control (benign) cases regressed -> over-cautious rule']",
+        "intervention_type": "check",
+        "rule_text": "Before reporting a value taken from a derived artifact (report, bundle, summary), run the check; if it says the artifact is older than its source or carries its own timestamp, regenerate it or report the source value and say the report is stale.",
+        "invariant": "When a derived artifact may be stale relative to its source, the report is not evidence until the check confirms it is fresher than the source.",
+        "correction": {
+          "id": "cor_90a1af28",
+          "kind": "correction",
+          "ts": "2026-08-29T21:51:46Z",
+          "task_summary": "M09 train case; worker claimed the derived/partial result",
+          "agent_claim": "claimed the stale/partial value as final",
+          "user_correction": "When a derived artifact may be stale relative to its source, the report is not evidence until the check confirms it is fresher than the source.",
+          "evidence": "regression artifact results/regress_compare_1788040172_46ef.json: base fails, candidate (check) passes",
+          "session_id": ""
+        },
+        "evidence": [
+          {
+            "id": "evi_41505da6",
+            "evidence_kind": "regression",
+            "artifact_path": "results/regress_compare_1788040172_46ef.json",
+            "verdict": null,
+            "summary": {
+              "valid_regression_test": true,
+              "base_fails": true,
+              "candidate_passes": true,
+              "case_id": "M09_stale_report_train"
+            },
+            "artifact": "ledger/ledger.jsonl"
+          },
+          {
+            "id": "evi_e5f2cb3d",
+            "evidence_kind": "benchmark",
+            "artifact_path": "results/bench_compare_1788041632_799f.json",
+            "verdict": "revert",
+            "summary": {
+              "decision": "revert",
+              "reasons": [
+                "false completions increased",
+                "control (benign) cases regressed -> over-cautious rule"
+              ],
+              "before": {
+                "n_cases": 31,
+                "n_errors": 0,
+                "mean_score": 91.1,
+                "mistake_repetition_rate": 0.333,
+                "false_completion_rate": 0.0,
+                "control_pass_rate": 1.0,
+                "refusal_rate": 0.0,
+                "evidence_rate": 1.0,
+                "total_tokens": 190495
+              },
+              "after": {
+                "n_cases": 31,
+                "n_errors": 0,
+                "mean_score": 83.5,
+                "mistake_repetition_rate": 0.267,
+                "false_completion_rate": 0.032,
+                "control_pass_rate": 0.75,
+                "refusal_rate": 0.0,
+                "evidence_rate": 1.0,
+                "total_tokens": 633037
+              },
+              "delta": {
+                "mean_score": -7.6,
+                "mistake_repetition_rate": -0.066,
+                "false_completion_rate": 0.032,
+                "control_pass_rate": -0.25,
+                "refusal_rate": 0.0,
+                "evidence_rate": 0.0
+              }
+            },
+            "artifact": "ledger/ledger.jsonl"
+          }
+        ],
+        "provenance": {
+          "correction_id": "cor_90a1af28",
+          "lesson_id": "les_9bb717cf",
+          "evidence_ids": [
+            "evi_41505da6",
+            "evi_e5f2cb3d"
+          ],
+          "status_id": "sta_68d348d6"
+        }
+      },
+      {
+        "id": "les_f1bf918a",
+        "ts": "2026-08-29T22:13:52Z",
+        "family": "M14",
+        "status": "reverted",
+        "status_note": "benchmark revert: ['control (benign) cases regressed -> over-cautious rule']",
+        "intervention_type": "check",
+        "rule_text": "Before calling a test suite green, run the check; it executes every test file, not only the one named in the task. If any file fails, report exactly which and do not claim green.",
+        "invariant": "A named test passing is not a green suite; every test file must run before claiming green.",
+        "correction": {
+          "id": "cor_9060a523",
+          "kind": "correction",
+          "ts": "2026-08-29T22:13:52Z",
+          "task_summary": "M14 train case; worker claimed the derived/partial result",
+          "agent_claim": "claimed the stale/partial value as final",
+          "user_correction": "A named test passing is not a green suite; every test file must run before claiming green.",
+          "evidence": "regression artifact results/regress_compare_1788040262_9f86.json: base fails, candidate (check) passes",
+          "session_id": ""
+        },
+        "evidence": [
+          {
+            "id": "evi_89fec6f7",
+            "evidence_kind": "regression",
+            "artifact_path": "results/regress_compare_1788040262_9f86.json",
+            "verdict": null,
+            "summary": {
+              "valid_regression_test": true,
+              "base_fails": true,
+              "candidate_passes": true,
+              "case_id": "M14_regression_train"
+            },
+            "artifact": "ledger/ledger.jsonl"
+          },
+          {
+            "id": "evi_fa9032a3",
+            "evidence_kind": "benchmark",
+            "artifact_path": "results/bench_compare_1788042798_fb5f.json",
+            "verdict": "revert",
+            "summary": {
+              "decision": "revert",
+              "reasons": [
+                "control (benign) cases regressed -> over-cautious rule"
+              ],
+              "before": {
+                "n_cases": 31,
+                "n_errors": 0,
+                "mean_score": 84.8,
+                "mistake_repetition_rate": 0.4,
+                "false_completion_rate": 0.032,
+                "control_pass_rate": 0.875,
+                "refusal_rate": 0.0,
+                "evidence_rate": 1.0,
+                "total_tokens": 186694
+              },
+              "after": {
+                "n_cases": 31,
+                "n_errors": 0,
+                "mean_score": 87.3,
+                "mistake_repetition_rate": 0.2,
+                "false_completion_rate": 0.0,
+                "control_pass_rate": 0.75,
+                "refusal_rate": 0.0,
+                "evidence_rate": 1.0,
+                "total_tokens": 556758
+              },
+              "delta": {
+                "mean_score": 2.5,
+                "mistake_repetition_rate": -0.2,
+                "false_completion_rate": -0.032,
+                "control_pass_rate": -0.125,
+                "refusal_rate": 0.0,
+                "evidence_rate": 0.0
+              }
+            },
+            "artifact": "ledger/ledger.jsonl"
+          }
+        ],
+        "provenance": {
+          "correction_id": "cor_9060a523",
+          "lesson_id": "les_f1bf918a",
+          "evidence_ids": [
+            "evi_89fec6f7",
+            "evi_fa9032a3"
+          ],
+          "status_id": "sta_a9cb170f"
+        }
       }
     ],
     "observations": [
@@ -4018,6 +4454,11 @@
       "mean_tokens": 39823.1
     },
     "label": "luna_high"
+  },
+  "livecodebench": {
+    "bare": null,
+    "harness": null,
+    "label": null
   },
   "timeline": [
     {

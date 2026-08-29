@@ -23,7 +23,7 @@ MAX_ERROR_SHARE = 0.2
 
 
 def decide(before: dict, after: dict) -> dict:
-    """Same rule as mcp_servers.eval_server.decide (kept in sync by tests/test_eval_decide.py)."""
+    """Same rule as eval_server.decide; kept in sync by test_eval_decide.py."""
     reasons = []
     for side, d in (("before", before), ("after", after)):
         n, e = d.get("n_cases", 0) or 0, d.get("n_errors", 0) or 0

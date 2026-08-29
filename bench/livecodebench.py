@@ -132,7 +132,7 @@ def _dataset_from_fallback(version_tag: str) -> list[dict]:
             req = urllib.request.Request(url, headers={"User-Agent": "roolytooly-bench/1.0"})
             with urllib.request.urlopen(req, timeout=300) as resp:  # noqa: S310
                 cache.write_bytes(resp.read())
-        for line in cache.read_text(encoding="utf-8").splitlines():
+        for line in open(cache, encoding="utf-8"):  # stream: the shard is ~130 MB
             line = line.strip()
             if line:
                 rows.append(json.loads(line))
