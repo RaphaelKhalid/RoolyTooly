@@ -13,7 +13,8 @@
         "@all"
       ],
       "require_approval_for_tools": [
-        "promote_lesson"
+        "promote_lesson",
+        "revoke_lesson"
       ],
       "preload": true
     },
