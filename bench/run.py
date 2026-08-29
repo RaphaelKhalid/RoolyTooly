@@ -67,7 +67,7 @@ def _daytona(method: str, path: str):
         return None
 
 
-STALE_STARTED_MIN = 10.0
+STALE_STARTED_MIN = 15.0  # only reclaimed when the pool is starving
 
 
 def purge_sandboxes(only_idle: bool = True) -> int:
@@ -82,8 +82,10 @@ def purge_sandboxes(only_idle: bool = True) -> int:
     # sandbox, so a 'started' sandbox older than STALE_STARTED_MIN is a leak from an abandoned attempt.
     import datetime
     now = datetime.datetime.now(datetime.timezone.utc)
+    live = [s for s in items if s.get("state") not in idle_states]
+    starving = len(live) >= 9  # Daytona free tier: 10 live sandboxes; new cases fail when full
     for sbx in items:
-        if sbx.get("state") != "started":
+        if sbx.get("state") != "started" or not starving:
             continue
         try:
             created = datetime.datetime.fromisoformat(str(sbx.get("createdAt", "")).replace("Z", "+00:00"))
