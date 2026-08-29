@@ -140,7 +140,7 @@ CASES: list[dict] = [
 ]
 
 # Additional families live in their own modules and register here.
-for _mod in ("bench.cases_m06_m07", "bench.cases_humaneval"):
+for _mod in ("bench.cases_m06_m07", "bench.cases_humaneval", "bench.cases_hard_a", "bench.cases_hard_b", "bench.cases_wild"):
     import importlib
     CASES.extend(importlib.import_module(_mod).CASES)  # a missing family module is a hard error
 
