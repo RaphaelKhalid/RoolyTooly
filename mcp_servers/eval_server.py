@@ -344,6 +344,100 @@ def get_job(job_id: str, wait_s: int = 45) -> dict:
     return {"job_id": job_id, **j}
 
 
+LEDGER_LOG = ROOT / "ledger" / "ledger.jsonl"
+
+
+def active_lessons() -> list[dict]:
+    """Promoted lessons, replayed from the ledger file (same rules as the ledger server)."""
+    lessons: dict[str, dict] = {}
+    if not LEDGER_LOG.exists():
+        return []
+    for line in LEDGER_LOG.read_text(encoding="utf-8").splitlines():
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if not isinstance(r, dict):
+            continue
+        if r.get("kind") == "lesson":
+            lessons[r["id"]] = {**r, "status": "candidate"}
+        elif r.get("kind") == "status" and r.get("lesson_id") in lessons:
+            lessons[r["lesson_id"]]["status"] = r.get("status")
+    return [L for L in lessons.values() if L["status"] == "active"]
+
+
+def harness_manifest(lessons: list[dict] | None = None) -> dict:
+    """The agent-as-of-now: worker model + every active lesson (rule/seed text injected; constraint
+    lessons also enable the evidence schema). This is what the timeline benchmark scores."""
+    lessons = active_lessons() if lessons is None else lessons
+    m = candidate_manifest("")
+    rules = [L["rule_text"] for L in lessons if L.get("intervention_type") in ("rule", "check", "constraint", "gate", "structural")]
+    seeds = [L["rule_text"] for L in lessons if L.get("intervention_type") == "seed"]
+    if rules:
+        m["instructions"] = (m["instructions"].rstrip() + "\n\n## Learned lessons (active)\n"
+                             + "\n".join(f"- {r.strip()}" for r in rules))
+    if seeds:
+        m["messages"] = [{"type": "user.message", "content": "Standing instructions for this session:\n"
+                          + "\n".join(f"- {t.strip()}" for t in seeds)}]
+    if any(L.get("intervention_type") == "constraint" for L in lessons):
+        m["response_format"] = {"type": "json_schema", "json_schema": {"name": "evidence_backed_reply", "schema": EVIDENCE_SCHEMA, "strict": True}}
+    return m
+
+
+@mcp.tool(annotations=RUN)
+def run_timeline_point(label: str = "", split: str = "", repeat: int = 1) -> dict:
+    """Score the CURRENT harness (worker model + all active lessons) on the benchmark and append a point
+    to the improvement timeline (results/timeline_*.json). Default: every non-train case. Returns a job id."""
+    lessons = active_lessons()
+    cases = C.select(split) if split else [c for c in C.CASES if c["split"] != "train"]
+    if not cases:
+        return {"error": "no cases selected"}
+    if (g := budget_guard(len(cases) * repeat)):
+        return g
+
+    def work():
+        rep = run_suite(harness_manifest(lessons), cases, repeat, 3, "timeline")
+        point = {"label": label, "ts": time.time(), "ran_at": rep["ran_at"], "worker_model": worker_model(),
+                 "n_active_lessons": len(lessons), "active_lessons": [{"id": L["id"], "family": L["family"],
+                                                                          "type": L.get("intervention_type")} for L in lessons],
+                 "summary": rep["summary"], "per_family": _per_family(rep["results"]),
+                 "cases": _slim(rep)["cases"]}
+        point["artifact"] = _save("timeline", point)
+        return point
+
+    return {"job_id": _job(work, f"timeline:{label or len(lessons)}")}
+
+
+def _per_family(results: list[dict]) -> dict:
+    fam: dict[str, dict] = {}
+    for r in results:
+        if r["error"]:
+            continue
+        d = fam.setdefault(r["family"], {"trap_runs": 0, "mistakes": 0, "ctrl_runs": 0, "ctrl_pass": 0})
+        if r["expected"] == "blocked":
+            d["trap_runs"] += 1
+            d["mistakes"] += int(r["mistake_repeated"])
+        else:
+            d["ctrl_runs"] += 1
+            d["ctrl_pass"] += int(r["breakdown"]["task_success"] > 0)
+    for d in fam.values():
+        d["repetition_rate"] = round(d["mistakes"] / d["trap_runs"], 3) if d["trap_runs"] else None
+    return fam
+
+
+@mcp.tool(annotations=READ)
+def get_timeline() -> dict:
+    """The improvement timeline: every timeline point (ts, active lessons, summary, per-family rates)."""
+    pts = []
+    for p in sorted(RESULTS.glob("timeline_*.json")):
+        try:
+            d = json.loads(p.read_text(encoding="utf-8"))
+            pts.append({k: d.get(k) for k in ("label", "ts", "ran_at", "n_active_lessons", "summary", "per_family", "artifact")})
+        except (OSError, json.JSONDecodeError):
+            continue
+    return {"points": pts}
+
+
 @mcp.tool(annotations=READ)
 def get_artifact(path: str, max_chars: int = 20000) -> dict:
     """Return the JSON text of a results/ artifact (for bundling immutable evidence into a skill PR)."""
