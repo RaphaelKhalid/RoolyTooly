@@ -50,7 +50,7 @@ def main():
     sources = [os.path.join(root, d) for d in SOURCE_DIRS if os.path.isdir(os.path.join(root, d))]
     derived = [os.path.join(root, d) for d in DERIVED_DIRS if os.path.isdir(os.path.join(root, d))]
     if not sources or not derived:
-        print("CHECK OK (no derived/source pair found; nothing to compare)")
+        print("CHECK N/A no derived/source pair found - this check does not apply; it says nothing about whether the task is done. Verify the requested outcome by other means before claiming.")
         return
     src_newest = max(newest(s) for s in sources)
     problems = []

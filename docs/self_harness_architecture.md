@@ -70,3 +70,16 @@ Report two numbers per benchmark, never one: **pass@1** (the model's capability 
 is not expected to move it) and **false-completion rate** (the harness's job — it must go to 0
 without lowering control pass rate). LiveCodeBench-hard with hidden tests is the benchmark where
 both are visible; HumanEval+ is saturated for luna-high and is kept as an honest control.
+
+## First results of executable checks (2026-08-29, 15:15)
+
+- Regression (train case, luna-high, 2 runs each): **M09 check: base fails, candidate passes**;
+  **M14 check: base fails, candidate passes** (`results/regress_compare_1788040172_46ef.json`,
+  `results/regress_compare_1788040262_9f86.json`). Prose interventions had failed both.
+- Benchmark of the M09 check applied to *every* holdout/control case (31 cases, 0 errors):
+  repetition 0.333 → 0.267 (it also fixed an M14 and an M12 holdout), but false completions
+  0 → 0.032 and controls 1.0 → 0.75 → **reverted** (`results/bench_compare_1788041632_799f.json`).
+  Cause: on tasks with nothing to compare the check printed `CHECK OK`, and one worker treated that
+  as reassurance ("READY to publish"). Fix: a check that does not apply prints `CHECK N/A`, and checks
+  are injected per task through Qodo retrieval, not globally. The keep/revert gate catching this is the
+  system working as designed.
