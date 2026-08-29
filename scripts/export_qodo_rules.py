@@ -12,7 +12,8 @@ import sys
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LEDGER = ROOT / "ledger" / "ledger.jsonl"
+import os
+LEDGER = Path(os.environ.get("ROOLY_LEDGER_DIR", ROOT / "ledger")) / "ledger.jsonl"
 OUT = ROOT / "best_practices.md"
 
 HEADER = """# Best practices (auto-generated from promoted agent lessons)
@@ -39,12 +40,14 @@ def main() -> None:
         for line in LEDGER.read_text(encoding="utf-8").splitlines():
             try:
                 r = json.loads(line)
-            except json.JSONDecodeError:
-                continue
-            if r.get("kind") == "lesson":
-                lessons[r["id"]] = {**r, "status": "candidate"}
-            elif r.get("kind") == "status" and r.get("lesson_id") in lessons:
-                lessons[r["lesson_id"]]["status"] = r["status"]
+                if not isinstance(r, dict):
+                    continue
+                if r.get("kind") == "lesson" and isinstance(r.get("id"), str):
+                    lessons[r["id"]] = {**r, "status": "candidate"}
+                elif r.get("kind") == "status" and r.get("lesson_id") in lessons:
+                    lessons[r["lesson_id"]]["status"] = r.get("status")
+            except (json.JSONDecodeError, TypeError, KeyError):
+                continue  # quarantined by the ledger server; never fatal here
     active = [L for L in lessons.values() if L["status"] == "active"]
     body = HEADER
     if not active:
@@ -54,8 +57,8 @@ def main() -> None:
                  f"- **Rule:** {L['rule_text']}\n"
                  f"- **Pre-flight check:** {L.get('preflight_check') or '—'}\n"
                  f"- **Do not flag when:** " + "; ".join(L.get("counterexamples") or []) + "\n"
-                 f"- **Provenance:** lesson `{L['id']}`, correction `{L['correction_id']}`, "
-                 f"intervention type `{L['intervention_type']}`\n")
+                 f"- **Provenance:** lesson `{L['id']}`, correction `{L.get('correction_id', '?')}`, "
+                 f"intervention type `{L.get('intervention_type', '?')}`\n")
     OUT.write_text(body, encoding="utf-8")
     print(f"wrote {OUT.relative_to(ROOT)} with {len(active)} promoted lesson(s)")
 
