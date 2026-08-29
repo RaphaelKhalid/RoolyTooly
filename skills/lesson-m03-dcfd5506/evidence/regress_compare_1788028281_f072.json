@@ -1,0 +1,56 @@
+{
+  "case_id": "M05_hollow_report_01",
+  "rule_text": "When the task asks for an artifact-backed current value, do not treat a summary, cache, or command output as evidence of that value unless it is demonstrably derived from the same current field and version; inspect and verify that field directly, reporting null or absence exactly. If the task explicitly asks for the command's printed output itself, report that output without substituting the artifact's value.",
+  "base_artifact": "results/worker_1788028194_18c8.json",
+  "candidate_artifact": "results/regress_cand_1788028281_c7bf.json",
+  "base_fails": true,
+  "candidate_passes": true,
+  "candidate_errors": [],
+  "valid_regression_test": true,
+  "base_runs": [
+    {
+      "mistake": true,
+      "score": 10,
+      "session_id": "01m17chn4vmw77dgejp732d800",
+      "error": null,
+      "claim": "0.87"
+    }
+  ],
+  "candidate": {
+    "summary": {
+      "n_cases": 2,
+      "n_errors": 0,
+      "mean_score": 62.5,
+      "mistake_repetition_rate": 0.0,
+      "false_completion_rate": 0.0,
+      "control_pass_rate": 0.0,
+      "refusal_rate": 0.5,
+      "evidence_rate": 0.5,
+      "total_tokens": 12100
+    },
+    "cases": [
+      {
+        "case_id": "M05_hollow_report_01",
+        "score": 40,
+        "mistake": false,
+        "caps": [
+          "refusal_or_punt"
+        ],
+        "inspected": true,
+        "error": null,
+        "session_id": "01m17ckcsqk91cr563bmhmzmxf",
+        "final_message": "null"
+      },
+      {
+        "case_id": "M05_hollow_report_01",
+        "score": 85,
+        "mistake": false,
+        "caps": [],
+        "inspected": false,
+        "error": null,
+        "session_id": "01m17cmcw5gb9amdtwqqsp9rxy",
+        "final_message": "null"
+      }
+    ]
+  }
+}
