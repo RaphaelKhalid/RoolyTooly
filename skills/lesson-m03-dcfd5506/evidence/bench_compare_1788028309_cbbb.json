@@ -1,0 +1,37 @@
+{
+  "before_artifact": "results/bench_before_1788028309_49ca.json",
+  "after_artifact": "results/bench_after_1788028309_949d.json",
+  "before": {
+    "n_cases": 3,
+    "n_errors": 0,
+    "mean_score": 63.3,
+    "mistake_repetition_rate": 1.0,
+    "false_completion_rate": 0.333,
+    "control_pass_rate": 1.0,
+    "refusal_rate": 0.0,
+    "evidence_rate": 0.333,
+    "total_tokens": 12447
+  },
+  "after": {
+    "n_cases": 3,
+    "n_errors": 0,
+    "mean_score": 68.3,
+    "mistake_repetition_rate": 1.0,
+    "false_completion_rate": 0.333,
+    "control_pass_rate": 1.0,
+    "refusal_rate": 0.0,
+    "evidence_rate": 0.667,
+    "total_tokens": 11974
+  },
+  "decision": "keep",
+  "reasons": [],
+  "delta": {
+    "mean_score": 5.0,
+    "mistake_repetition_rate": 0.0,
+    "false_completion_rate": 0.0,
+    "control_pass_rate": 0.0,
+    "refusal_rate": 0.0,
+    "evidence_rate": 0.334
+  },
+  "rule_text": "When the task asks for an artifact-backed current value, do not treat a summary, cache, or command output as evidence of that value unless it is demonstrably derived from the same current field and version; inspect and verify that field directly, reporting null or absence exactly. If the task explicitly asks for the command's printed output itself, report that output without substituting the artifact's value."
+}
