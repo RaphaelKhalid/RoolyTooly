@@ -28,6 +28,7 @@ from mcp.types import ToolAnnotations  # noqa: E402
 from bench import cases as C  # noqa: E402
 from bench.run import load_manifest, run_suite  # noqa: E402
 from harness import tf  # noqa: E402
+from harness import spend as SP  # noqa: E402
 
 RESULTS = ROOT / "results"
 RESULTS.mkdir(exist_ok=True)
@@ -75,6 +76,18 @@ def decide(before: dict, after: dict) -> dict:
                        "refusal_rate", "evidence_rate")}}
 
 
+# rough per-case cost ceiling used only for the pre-flight budget check (mini worker, ~5k tokens/case)
+EST_USD_PER_CASE = 0.03
+
+
+def budget_guard(n_cases: int) -> dict | None:
+    ok, st = SP.can_spend(n_cases * EST_USD_PER_CASE)
+    if ok:
+        return None
+    return {"error": "budget guard: refusing to start", "spent_usd": st["spent_usd"], "cap_usd": st["cap_usd"],
+            "reserve_usd": st["reserve_usd"], "estimated_run_usd": round(n_cases * EST_USD_PER_CASE, 3)}
+
+
 def _job(fn, label: str) -> str:
     jid = f"job_{uuid.uuid4().hex[:8]}"
     JOBS[jid] = {"status": "running", "label": label, "started": time.time()}
@@ -116,6 +129,8 @@ def run_worker(case_id: str, rule_text: str = "", reproduce_until_mistake: bool 
     Synchronous (~30-90s)."""
     if case_id not in C.BY_ID:
         return {"error": f"unknown case {case_id}"}
+    if (g := budget_guard(max_attempts)):
+        return g
     attempts = []
     for i in range(max_attempts if reproduce_until_mistake else 1):
         rep = run_suite(candidate_manifest(rule_text), [C.BY_ID[case_id]], 1, 1, "worker")
@@ -149,6 +164,8 @@ def run_regression(case_id: str, rule_text: str, base_artifact: str = "", repeat
     if repeat < 1:
         return {"error": "repeat must be >= 1"}
     case = C.BY_ID[case_id]
+    if (g := budget_guard(repeat * 2)):
+        return g
 
     def work():
         if base_artifact and (ROOT / base_artifact).exists():
@@ -190,6 +207,8 @@ def run_benchmark(rule_text: str, split: str = "", repeat: int = 1) -> dict:
     cases = C.select(split) if split else [c for c in C.CASES if c["split"] in ("holdout", "control")]
     if not cases:
         return {"error": "no cases selected; refusing to run an empty benchmark"}
+    if (g := budget_guard(len(cases) * repeat * 2)):
+        return g
 
     def work():
         before = run_suite(load_manifest(BASE_MANIFEST), cases, repeat, 3, "bench_before")
@@ -238,6 +257,13 @@ def get_job(job_id: str, wait_s: int = 45) -> dict:
         return {"job_id": job_id, "status": "running", "label": j["label"],
                 "elapsed_s": round(time.time() - j["started"], 1)}
     return {"job_id": job_id, **j}
+
+
+@mcp.tool(annotations=READ)
+def budget_status() -> dict:
+    """Project spend vs cap: sums every TrueForge session turn (workers, immune sessions, UI) at published
+    per-model prices. run_* tools refuse to start when spent + estimate would exceed cap - reserve."""
+    return SP.total_spend()
 
 
 @mcp.tool(annotations=READ)
