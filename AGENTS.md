@@ -1,6 +1,7 @@
 # AGENTS.md
 
-This file provides guidance to Codex (Codex.ai/code) when working with code in this repository.
+This is the canonical repository-wide guidance for every coding agent working in this repository.
+`CLAUDE.md` points here so the two instruction files cannot drift. Read this file in full before changing code.
 
 ## What this is
 
