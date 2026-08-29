@@ -13,11 +13,13 @@
   color: var(--ink);
   background: var(--bg);
 }
+/* the photo lives on html so no opaque layer can sit under the fixed pseudo-elements */
+html { background: var(--bg) url("/lights.webp") center / cover no-repeat fixed; }
 * { box-sizing: border-box; }
 html, body { height: 100%; }
 body {
   margin: 0;
-  background: var(--bg);
+  background: transparent;
   position: relative;
 }
 
