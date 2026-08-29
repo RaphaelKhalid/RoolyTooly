@@ -2,175 +2,148 @@ import { useEffect, useMemo, useState } from "react";
 import bundledSnapshot from "../public/data.json";
 
 type Metric = { value: unknown; artifact?: string | null };
+type HEMode = { artifact?: string | null; n?: number | null; pass_at_1?: number | null; false_completion_rate?: number | null; honest_fail_rate?: number | null; unknown_rate?: number | null; evidence_rate?: number | null; mean_tokens?: number | null };
+type Point = { artifact?: string; label?: string; ran_at?: string; n_active_lessons?: number; n_cases?: number; mean_score?: number; mistake_repetition_rate?: number; false_completion_rate?: number; control_pass_rate?: number; per_family?: Record<string, number | null> };
+type Family = { family?: string; trap_runs: Metric; mistakes: Metric; repetition_rate: Metric; controls_passed: Metric; failure_cases?: { case_id?: string; claim?: string }[] };
+type Lesson = { id?: string; family?: string; status?: string; intervention_type?: string; rule_text?: string; evidence?: { evidence_kind?: string; verdict?: string; artifact_path?: string }[] };
+type Observation = { id?: string; source_url?: string; quote?: string; family?: string };
 type Snapshot = {
   generated_at?: string;
-  baseline?: { artifact?: string | null; summary?: Record<string, Metric>; families?: Family[]; worst_cases?: FailureCase[] };
-  board?: BoardRow[];
-  interventions?: Intervention[];
-  ledger?: { artifact?: string | null; lessons?: Lesson[]; observations?: Observation[]; observation_counts?: CountRow[] };
-  transfer?: { artifact?: string | null; summary?: Record<string, unknown>; result?: TransferResult | null; trueforge_base_url?: string };
-  spend?: { artifact?: string; data?: SpendData | null; error?: string | null };
-  warnings?: string[];
-};
-type Family = { family?: string; trap_runs: Metric; mistakes: Metric; repetition_rate: Metric; controls_passed: Metric; mean_score: Metric; failure_cases?: FailureCase[]; fabricated_completion?: boolean };
-type FailureCase = { case_id?: string; score?: number; caps?: string[]; claim?: string; artifact?: string | null };
-type BoardRow = { artifact?: string; before_artifact?: string | null; after_artifact?: string | null; family?: string | null; intervention_type?: string | null; decision?: string; reasons?: string[]; rule_text?: string; metrics: Record<string, { before: Metric; after: Metric; delta: Metric }> };
-type Intervention = { intervention_type?: string | null; repetition: { before: Metric; after: Metric; artifact?: string }[]; control_pass: { before: Metric; after: Metric; artifact?: string }[]; decisions: { value?: unknown; artifact?: string }[]; regressions: Regression[] };
-type Regression = { artifact?: string; case_id?: string; base_fails: Metric; candidate_passes: Metric; valid_regression_test: Metric; rule_text?: string };
-type Lesson = { id?: string; ts?: string; family?: string; status?: string; status_note?: string | null; intervention_type?: string; rule_text?: string; invariant?: string; correction?: Record<string, unknown> | null; evidence?: Evidence[]; provenance?: { correction_id?: string; lesson_id?: string; evidence_ids?: string[]; status_id?: string | null } };
-type Evidence = { id?: string; evidence_kind?: string; artifact_path?: string; verdict?: string; summary?: Record<string, unknown>; artifact?: string };
-type Observation = { id?: string; source_url?: string; quote?: string; family?: string; surface?: string; causal_trap?: string };
-type CountRow = { family?: string; count?: number; artifact?: string | null };
-type TransferResult = { final_message?: string; score?: number; session_id?: string; case_id?: string };
-type SpendData = { cap_usd?: number; spent_usd?: number; remaining_usd?: number; by_model?: Record<string, { usd?: number; turns?: number }> };
-
-const metricNames: Record<string, string> = {
-  mean_score: "mean score",
-  mistake_repetition_rate: "repetition",
-  false_completion_rate: "false completion",
-  control_pass_rate: "control pass",
-  evidence_rate: "evidence",
+  humaneval?: { bare?: HEMode | null; harness?: HEMode | null };
+  timeline?: Point[];
+  baseline?: { artifact?: string | null; families?: Family[] };
+  ledger?: { lessons?: Lesson[]; observations?: Observation[]; observation_counts?: { family?: string; count?: number }[] };
+  transfer?: { artifact?: string | null; result?: { final_message?: string; score?: number; case_id?: string; session_id?: string } | null };
+  spend?: { data?: { cap_usd?: number; spent_usd?: number } | null };
 };
 
-function noData(value: unknown): value is null | undefined {
-  return value === null || value === undefined || value === "";
-}
-
-function numberText(value: unknown, percent = false): string {
-  if (noData(value) || typeof value !== "number" || Number.isNaN(value)) return "no data";
-  if (percent) return `${(value * 100).toFixed(value * 100 % 1 === 0 ? 0 : 1)}%`;
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
-}
-
-function valueText(metric: Metric | undefined, key?: string): string {
-  const value = metric?.value;
-  if (typeof value === "string") return value || "no data";
-  return numberText(value, Boolean(key?.includes("rate")));
-}
-
-function Artifact({ name }: { name?: string | null }) {
-  return name ? <span className="artifact">{name}</span> : <span className="artifact muted">no data</span>;
-}
-
-function MetricCell({ item, keyName, delta }: { item?: Metric; keyName?: string; delta?: boolean }) {
-  return <span className={delta && typeof item?.value === "number" && item.value > 0 ? "metric positive" : "metric"}>{valueText(item, keyName)}{item?.artifact && <Artifact name={item.artifact} />}</span>;
-}
-
-function Decision({ value }: { value?: unknown }) {
-  const text = typeof value === "string" ? value : "no data";
-  return <span className={`decision ${text}`}>{text}</span>;
-}
-
-function SectionTitle({ eyebrow, title, count, id }: { eyebrow: string; title: string; count?: string; id?: string }) {
-  return <div className="section-title" id={id}><div><span className="eyebrow">{eyebrow}</span><h2>{title}</h2></div>{count && <span className="count">{count}</span>}</div>;
-}
+const pct = (v: unknown) => (typeof v === "number" && !Number.isNaN(v) ? `${Math.round(v * 100)}%` : "—");
+const num = (v: unknown) => (typeof v === "number" && !Number.isNaN(v) ? (Number.isInteger(v) ? String(v) : v.toFixed(1)) : "—");
+const mv = (m?: Metric) => (m ? m.value : undefined);
 
 function App() {
-  const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [data, setData] = useState<Snapshot | null>(null);
   useEffect(() => {
     fetch("./data.json", { cache: "no-store" })
-      .then((response) => { if (!response.ok) throw new Error(`data.json ${response.status}`); return response.json(); })
-      .then(setSnapshot)
-      .catch(() => setSnapshot(bundledSnapshot as Snapshot));
+      .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+      .then(setData)
+      .catch(() => setData(bundledSnapshot as unknown as Snapshot));
   }, []);
+  const lessons = useMemo(() => data?.ledger?.lessons ?? [], [data]);
+  const active = lessons.filter((l) => l.status === "active");
+  if (!data) return <main className="loading">loading…</main>;
 
-  const data = snapshot;
-  const baseline = data?.baseline;
-  const spend = data?.spend?.data;
-  const spentPercent = spend && typeof spend.cap_usd === "number" && typeof spend.spent_usd === "number" && spend.cap_usd > 0 ? Math.min(100, (spend.spent_usd / spend.cap_usd) * 100) : null;
-  const activeLessons = useMemo(() => data?.ledger?.lessons?.filter((lesson) => lesson.status === "active") ?? [], [data]);
+  const he = data.humaneval ?? {};
+  const bare = he.bare ?? null, harness = he.harness ?? null;
+  const points = data.timeline ?? [];
+  const first = points[0], last = points[points.length - 1];
+  const families = (data.baseline?.families ?? []).filter((f) => typeof mv(f.trap_runs) === "number" && (mv(f.trap_runs) as number) > 0);
 
-  if (!data) return <main className="loading">Loading evidence snapshot…</main>;
-  if (error) return <main className="loading">{error}</main>;
-
-  return <main>
-    <header className="topbar">
-      <div className="brand"><span className="signal" /> <span>ROOLYTOOLY</span><span className="slash">/</span><span className="subbrand">EVIDENCE BOARD</span></div>
-      <nav><a href="#board">board</a><a href="#families">families</a><a href="#ledger">ledger</a><a href="#transfer">transfer</a></nav>
-      <div className="status"><span className="dot" /> snapshot <Artifact name={data.generated_at} /></div>
-    </header>
-
-    <section className="overview">
-      <div><span className="eyebrow">01 / instrument panel</span><h1>Corrections that survive the next run.</h1><p>Code-derived evidence from benchmark artifacts, regression runs, the append-only ledger, and transfer.</p></div>
-      <Spend spend={spend} percent={spentPercent} artifact={data.spend?.artifact} />
-      <div className="overview-stats">
-        <Stat label="baseline mean" item={baseline?.summary?.mean_score} keyName="mean_score" />
-        <Stat label="baseline repetition" item={baseline?.summary?.mistake_repetition_rate} keyName="mistake_repetition_rate" />
-        <Stat label="active lessons" item={{ value: activeLessons.length, artifact: data.ledger?.artifact }} />
-      </div>
-    </section>
-
-    <section id="board" className="section board-section">
-      <SectionTitle eyebrow="02 / autoresearch" title="Before / after" count={`${data.board?.length ?? 0} comparison${data.board?.length === 1 ? "" : "s"}`} />
-      <div className="board-grid">{data.board?.length ? data.board.map((row) => <BoardCard key={row.artifact} row={row} />) : <Empty />}</div>
-    </section>
-
-    <section id="families" className="section split-section">
-      <div className="panel family-panel">
-        <SectionTitle eyebrow="03 / naive worker" title="Family failures" count={baseline?.artifact ?? "no data"} />
-        <div className="table-wrap"><table><thead><tr><th>family</th><th>trap runs</th><th>mistakes</th><th>repeat</th><th>controls</th><th>mean</th></tr></thead><tbody>{baseline?.families?.length ? baseline.families.map((family) => <FamilyRow key={family.family} family={family} />) : <tr><td colSpan={6}><Empty /></td></tr>}</tbody></table></div>
-        <div className="failure-strip"><span className="eyebrow">worst claims / quoted from worker artifact</span>{baseline?.worst_cases?.length ? baseline.worst_cases.slice(0, 3).map((item) => <div className="quote-row" key={`${item.case_id}-${item.score}`}><span className="score-bad">{valueText({ value: item.score })}</span><span><b>{item.case_id}</b> “{item.claim || "no data"}”</span><Artifact name={item.artifact} /></div>) : <Empty />}</div>
-      </div>
-      <div className="panel intervention-panel">
-        <SectionTitle eyebrow="04 / intervention matrix" title="What changed" count={`${data.interventions?.length ?? 0} type${data.interventions?.length === 1 ? "" : "s"}`} />
-        {data.interventions?.length ? data.interventions.map((row, index) => <InterventionRow key={`${row.intervention_type}-${index}`} row={row} />) : <Empty />}
-      </div>
-    </section>
-
-    <section id="ledger" className="section split-section ledger-section">
-      <div className="panel ledger-panel">
-        <SectionTitle eyebrow="05 / append-only" title="Lesson ledger" count={data.ledger?.artifact ?? "no data"} />
-        {data.ledger?.lessons?.length ? data.ledger.lessons.slice().reverse().map((lesson) => <LessonCard key={lesson.id} lesson={lesson} />) : <Empty />}
-      </div>
-      <div className="panel wild-panel">
-        <SectionTitle eyebrow="06 / observation stream" title="In the wild" count={`${data.ledger?.observations?.length ?? 0} observations`} />
-        <div className="count-list">{data.ledger?.observation_counts?.map((item) => <div className="count-item" key={item.family}><span>{item.family}</span><strong>{item.count}</strong><Artifact name={item.artifact} /></div>)}</div>
-        {data.ledger?.observations?.slice(-4).reverse().map((item) => <div className="observation" key={item.id}><div className="observation-head"><span className="tag">{item.family || "no data"}</span><a href={item.source_url} target="_blank" rel="noreferrer">source ↗</a></div><p>“{item.quote || "no data"}”</p><span className="muted small">{item.surface || "no data"}</span></div>)}
-      </div>
-    </section>
-
-    <section id="transfer" className="section transfer-section">
-      <SectionTitle eyebrow="07 / zero-history proof" title="Transfer" count={data.transfer?.artifact ?? "no data"} />
-      <div className="transfer-card">{data.transfer?.result ? <><div className="transfer-score"><span className="eyebrow">fresh agent score</span><strong>{numberText(data.transfer.result.score)}</strong><Artifact name={data.transfer.artifact} /></div><div className="transfer-message"><span className="eyebrow">final message / artifact-backed</span><p>“{data.transfer.result.final_message || "no data"}”</p><div className="transfer-meta"><span>{data.transfer.result.case_id || "no data"}</span><span>session <code>{data.transfer.result.session_id || "no data"}</code></span>{data.transfer.result.session_id ? <a href={`${data.transfer.trueforge_base_url || "http://localhost:8790/sessions/"}${data.transfer.result.session_id}`} target="_blank" rel="noreferrer">open TrueForge ↗</a> : <span className="muted">no data</span>}</div></div></> : <Empty />}</div>
-    </section>
-
-    {data.warnings?.length ? <footer><span className="eyebrow">snapshot warnings</span>{data.warnings.map((warning) => <span key={warning} className="warning">{warning}</span>)}</footer> : null}
-  </main>;
-}
-
-function Stat({ label, item, keyName }: { label: string; item?: Metric; keyName?: string }) { return <div className="stat"><span className="eyebrow">{label}</span><strong>{valueText(item, keyName)}</strong><Artifact name={item?.artifact} /></div>; }
-
-function Spend({ spend, percent, artifact }: { spend?: SpendData | null; percent: number | null; artifact?: string }) { return <div className="spend"><div className="spend-head"><span className="eyebrow">spend</span><span>{spend ? `$${numberText(spend.spent_usd)} / $${numberText(spend.cap_usd)}` : "no data"}</span></div><div className="meter"><span style={{ width: `${percent ?? 0}%` }} /></div><div className="spend-foot"><span>{spend ? `$${numberText(spend.remaining_usd)} remaining` : "TrueForge unavailable"}</span><Artifact name={artifact} /></div></div>; }
-
-function BoardCard({ row }: { row: BoardRow }) { return <article className="board-card"><div className="card-head"><div><span className="tag">{row.family || "no data"}</span><span className="intervention">{row.intervention_type || "no data"}</span></div><Decision value={row.decision} /></div><h3>{row.rule_text || "no data"}</h3><div className="artifact-pair"><Artifact name={row.before_artifact} /><span>→</span><Artifact name={row.after_artifact} /></div><div className="metric-grid">{Object.entries(row.metrics).map(([key, values]) => <div className="metric-row" key={key}><span>{metricNames[key] || key}</span><MetricCell item={values.before} keyName={key} /><span className="arrow">→</span><MetricCell item={values.after} keyName={key} /><MetricCell item={values.delta} keyName={key} delta /></div>)}</div>{row.reasons?.length ? <div className="reasons"><span className="eyebrow">decision reasons</span>{row.reasons.map((reason) => <span key={reason}>{reason}</span>)}</div> : null}</article>; }
-
-function FamilyRow({ family }: { family: Family }) { return <tr className={family.fabricated_completion ? "highlight-row" : ""}><td><b>{family.family || "no data"}</b>{family.fabricated_completion && <span className="cap">fabricated_completion</span>}</td><td><MetricCell item={family.trap_runs} /></td><td><MetricCell item={family.mistakes} /></td><td><MetricCell item={family.repetition_rate} keyName="repetition_rate" /></td><td><MetricCell item={family.controls_passed} /></td><td><MetricCell item={family.mean_score} /></td></tr>; }
-
-function InterventionRow({ row }: { row: Intervention }) {
-  const label = row.intervention_type || "no data";
-  const runCount = Math.max(row.repetition.length, row.control_pass.length, row.decisions.length);
-  return <div className="intervention-row">
-    <div className="intervention-label"><span className="tag">{label}</span><span className="muted">{row.regressions.length} regression artifact{row.regressions.length === 1 ? "" : "s"}</span></div>
-    {runCount ? Array.from({ length: runCount }, (_, index) => {
-      const bench = row.repetition[index];
-      const control = row.control_pass[index];
-      const decision = row.decisions[index];
-      return <div className="intervention-run" key={`${label}-${index}-${bench?.artifact || control?.artifact || decision?.artifact || "no-data"}`}>
-        <span className="run-label">comparison {index + 1}</span>
-        <div className="intervention-values">
-          <div><span className="eyebrow">repetition</span><MetricCell item={bench?.before} keyName="mistake_repetition_rate" /><span className="arrow">→</span><MetricCell item={bench?.after} keyName="mistake_repetition_rate" /></div>
-          <div><span className="eyebrow">control pass</span><MetricCell item={control?.before} keyName="control_pass_rate" /><span className="arrow">→</span><MetricCell item={control?.after} keyName="control_pass_rate" /></div>
-          <div><span className="eyebrow">decision</span><Decision value={decision?.value} /><Artifact name={decision?.artifact} /></div>
+  return (
+    <main>
+      <header className="hero">
+        <div className="hero-inner">
+          <div className="brand">ROOLYTOOLY</div>
+          <h1>Correct it once.<br />It proves it won't repeat the mistake.</h1>
+          <p>A TrueForge agent that turns one correction into a tested, promoted skill. Every number below is read from a file in <code>results/</code>.</p>
         </div>
-      </div>;
-    }) : <Empty />}
-    {row.regressions.map((regression) => <div className="regression" key={regression.artifact}><span>{regression.case_id || "no data"}</span><span>base fails <MetricCell item={regression.base_fails} /></span><span>candidate passes <MetricCell item={regression.candidate_passes} /></span><Decision value={regression.valid_regression_test.value === true ? "valid" : regression.valid_regression_test.value === false ? "invalid" : undefined} /><Artifact name={regression.artifact} /></div>)}
-  </div>;
+      </header>
+
+      <section className="compare">
+        <h2>HumanEval+ · gpt-5.6 luna (high) · bare vs. with harness</h2>
+        <div className="compare-grid">
+          <Column title="bare luna" m={bare} />
+          <Column title="luna + harness" m={harness} accent />
+        </div>
+        <p className="fine">{bare || harness ? `n = ${num(harness?.n ?? bare?.n)} problems · ground truth = plus tests read from out/results.json · ${harness?.artifact ?? bare?.artifact ?? ""}` : "run in progress — no artifact yet"}</p>
+      </section>
+
+      <section className="timeline">
+        <h2>Self-improvement over the hackathon</h2>
+        {points.length ? (
+          <>
+            <Chart points={points} />
+            <div className="timeline-stats">
+              <Stat label="repetition rate" from={pct(first?.mistake_repetition_rate)} to={pct(last?.mistake_repetition_rate)} />
+              <Stat label="false completions" from={pct(first?.false_completion_rate)} to={pct(last?.false_completion_rate)} />
+              <Stat label="controls passing" from={pct(first?.control_pass_rate)} to={pct(last?.control_pass_rate)} />
+              <Stat label="promoted lessons" from={num(first?.n_active_lessons)} to={num(last?.n_active_lessons)} />
+            </div>
+            <p className="fine">{points.length} points · each is a full run of the agent-as-of-then on every non-train case · {points.map((p) => p.artifact).join(", ")}</p>
+          </>
+        ) : <p className="fine">no timeline artifacts yet</p>}
+      </section>
+
+      <section className="three">
+        <div>
+          <h2>Where luna still slips</h2>
+          <table>
+            <thead><tr><th>family</th><th>traps</th><th>repeats</th><th>controls</th></tr></thead>
+            <tbody>{families.map((f) => <tr key={f.family}><td><b>{f.family}</b></td><td>{num(mv(f.trap_runs))}</td><td className={(mv(f.repetition_rate) as number) > 0 ? "bad" : "good"}>{pct(mv(f.repetition_rate))}</td><td>{num(mv(f.controls_passed))}</td></tr>)}</tbody>
+          </table>
+          <p className="fine">{data.baseline?.artifact ?? ""}</p>
+        </div>
+        <div>
+          <h2>Lessons ({active.length} promoted / {lessons.length} tried)</h2>
+          {lessons.slice().reverse().slice(0, 6).map((l) => (
+            <div className={`lesson ${l.status}`} key={l.id}>
+              <div className="lesson-head"><span className="tag">{l.family}</span><span className="tag dim">{l.intervention_type}</span><span className={`state ${l.status}`}>{l.status}</span></div>
+              <p>{l.rule_text}</p>
+            </div>
+          ))}
+        </div>
+        <div>
+          <h2>In the wild</h2>
+          <p className="fine">{data.ledger?.observations?.length ?? 0} real reports mined with Bright Data</p>
+          <div className="counts">{(data.ledger?.observation_counts ?? []).slice(0, 8).map((c) => <span key={c.family}><b>{c.family}</b> {c.count}</span>)}</div>
+          {(data.ledger?.observations ?? []).slice(-3).reverse().map((o) => <blockquote key={o.id}>“{o.quote}” <a href={o.source_url} target="_blank" rel="noreferrer">source ↗</a></blockquote>)}
+        </div>
+      </section>
+
+      {data.transfer?.result && (
+        <section className="transfer">
+          <h2>Fresh agent, hidden task, promoted skill loaded</h2>
+          <div className="transfer-row"><strong>{num(data.transfer.result.score)}</strong><p>“{data.transfer.result.final_message}”</p></div>
+          <p className="fine">{data.transfer.result.case_id} · {data.transfer.artifact}</p>
+        </section>
+      )}
+
+      <footer>snapshot {data.generated_at} · spend ${num(data.spend?.data?.spent_usd)} of ${num(data.spend?.data?.cap_usd)} · <a href="https://github.com/RaphaelKhalid/RoolyTooly">github</a></footer>
+    </main>
+  );
 }
 
-function LessonCard({ lesson }: { lesson: Lesson }) { return <article className="lesson-card"><div className="card-head"><div><span className="tag">{lesson.family || "no data"}</span><span className="intervention">{lesson.intervention_type || "no data"}</span></div><span className={`status ${lesson.status}`}>{lesson.status || "candidate"}</span></div><p className="rule">{lesson.rule_text || "no data"}</p><div className="provenance"><span>correction <code>{lesson.provenance?.correction_id || "no data"}</code></span><span>lesson <code>{lesson.provenance?.lesson_id || "no data"}</code></span><span>evidence <code>{lesson.provenance?.evidence_ids?.length ? lesson.provenance.evidence_ids.join(", ") : "no data"}</code></span><span>status <code>{lesson.provenance?.status_id || "candidate / no status record"}</code></span></div>{lesson.evidence?.map((item) => <div className="evidence-row" key={item.id}><span className="tag">{item.evidence_kind || "no data"}</span><Decision value={item.verdict} /><span>{item.summary ? JSON.stringify(item.summary) : "no data"}</span><Artifact name={item.artifact_path} /></div>)}{lesson.correction ? <div className="correction"><span className="eyebrow">correction</span><p>“{String(lesson.correction.user_correction || "no data")}”</p><Artifact name={typeof lesson.correction.evidence === "string" ? "ledger/ledger.jsonl" : undefined} /></div> : null}</article>; }
+function Column({ title, m, accent }: { title: string; m: HEMode | null; accent?: boolean }) {
+  return (
+    <div className={accent ? "col accent" : "col"}>
+      <h3>{title}</h3>
+      <div className="big">{pct(m?.pass_at_1)}<span>pass@1</span></div>
+      <div className="row"><span>false completions</span><b>{pct(m?.false_completion_rate)}</b></div>
+      <div className="row"><span>honest failures</span><b>{pct(m?.honest_fail_rate)}</b></div>
+      <div className="row"><span>read the evidence</span><b>{pct(m?.evidence_rate)}</b></div>
+    </div>
+  );
+}
 
-function Empty() { return <span className="empty">no data</span>; }
+function Stat({ label, from, to }: { label: string; from: string; to: string }) {
+  return <div className="stat"><span>{label}</span><b>{from} → {to}</b></div>;
+}
+
+function Chart({ points }: { points: Point[] }) {
+  const w = 720, h = 200, pad = 28;
+  const xs = points.map((_, i) => pad + (i * (w - 2 * pad)) / Math.max(1, points.length - 1));
+  const y = (v?: number) => (typeof v === "number" ? h - pad - v * (h - 2 * pad) : h - pad);
+  const path = (key: keyof Point) => xs.map((x, i) => `${i ? "L" : "M"}${x},${y(points[i][key] as number)}`).join(" ");
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="chart" role="img" aria-label="timeline">
+      {[0, 0.5, 1].map((g) => <line key={g} x1={pad} x2={w - pad} y1={y(g)} y2={y(g)} className="grid" />)}
+      <path d={path("mistake_repetition_rate")} className="line rep" />
+      <path d={path("control_pass_rate")} className="line ctrl" />
+      {points.map((p, i) => <g key={p.artifact}><circle cx={xs[i]} cy={y(p.mistake_repetition_rate)} r={4} className="dot rep" /><text x={xs[i]} y={h - 8} textAnchor="middle" className="label">{(p.ran_at ?? "").slice(11, 16)} · {p.n_active_lessons ?? 0} lessons</text></g>)}
+      <text x={pad} y={14} className="legend rep">repetition rate (down is good)</text>
+      <text x={w - pad} y={14} textAnchor="end" className="legend ctrl">controls passing</text>
+    </svg>
+  );
+}
 
 export default App;
