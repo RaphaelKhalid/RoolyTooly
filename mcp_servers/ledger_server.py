@@ -42,7 +42,7 @@ FAMILIES = {
     "M22": "Repeating a corrected mistake",
     "M23": "Representation and deliverable mismatch",
 }
-INTERVENTIONS = ("rule", "check", "gate", "constraint")
+INTERVENTIONS = ("rule", "seed", "constraint", "check", "gate", "structural")
 EVIDENCE_KINDS = ("regression", "benchmark", "falsifier", "transfer")
 
 mcp = FastMCP("lesson-ledger", host="127.0.0.1", port=int(os.environ.get("ROOLY_LEDGER_PORT", "8901")),
