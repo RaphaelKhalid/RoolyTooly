@@ -181,3 +181,21 @@ def test_observation_stats_tolerates_a_malformed_observation_record(ledger_env):
     stats = L.observation_stats()
     assert stats["total"] == 1
     assert stats["per_family"]["M05"] == 1
+
+
+def test_revoke_only_active_and_records_supersession(ledger_env):
+    from mcp_servers import ledger_server as ls
+    cid = ls.record_correction("t", "c", "u", "e")["correction_id"]
+    lid = ls.propose_lesson(cid, "M05", "inv", "rule", "rule", ["M05_hollow_report_01"], [])["lesson_id"]
+    assert "error" in ls.revoke_lesson(lid, "not active yet")
+    reg = ledger_env / "regress.json"
+    reg.write_text('{"valid_regression_test": true, "base_fails": true, "candidate_passes": true}', encoding="utf-8")
+    ls.attach_evidence(lid, "regression", str(reg))
+    ben = ledger_env / "bench.json"
+    ben.write_text('{"decision": "keep", "before": {}, "after": {}}', encoding="utf-8")
+    ls.attach_evidence(lid, "benchmark", str(ben))
+    assert ls.promote_lesson(lid)["status"] == "active"
+    out = ls.revoke_lesson(lid, "superseded")
+    assert out["status"] == "revoked"
+    assert ls.get_active_lessons()["count"] == 0
+    assert "error" in ls.revoke_lesson(lid, "again")

@@ -130,7 +130,7 @@ def build_baseline(path: Path | None, obj: dict[str, Any] | None) -> dict[str, A
         traps = [result for result in results if result.get("split") != "control"]
         controls = [result for result in results if result.get("split") == "control"]
         mistakes = [result for result in traps if result.get("mistake_repeated") is True]
-        passed_controls = [result for result in controls if isinstance(result.get("score"), (int, float)) and result["score"] >= 100]
+        passed_controls = [result for result in controls if ((result.get("breakdown") or {}).get("task_success", 0) or 0) > 0]  # same definition as the checker
         scores = [result.get("score") for result in traps if isinstance(result.get("score"), (int, float))]
         bad_cases = sorted(
             [result for result in traps if isinstance(result.get("score"), (int, float))],
@@ -229,7 +229,7 @@ def build_ledger(records: list[dict[str, Any]], statuses: dict[str, dict[str, An
     observations = [record for record in records if record.get("kind") == "observation"]
     evidence_by_lesson: dict[str, list[dict[str, Any]]] = defaultdict(list)
     for record in evidence:
-        summary = record.get("summary") if isinstance(record.get("summary"), dict) else {}
+        summary = record.get("derived") if isinstance(record.get("derived"), dict) else (record.get("summary") if isinstance(record.get("summary"), dict) else {})
         verdict = summary.get("decision")
         if verdict is None and "passed" in summary:
             verdict = "passed" if summary.get("passed") else "failed"
@@ -296,6 +296,56 @@ def build_spend() -> dict[str, Any]:
         return {"artifact": command, "data": None, "error": str(exc)}
 
 
+def build_humaneval(warnings: list[str]) -> dict[str, Any]:
+    """Return the latest paired bare and harness HumanEval+ runs sharing one label.
+
+    "Bare" is the worker alone; "harness" is the worker plus its active lessons. Both modes
+    must come from the same `--label` run so the comparison is like for like."""
+    out: dict[str, Any] = {"bare": None, "harness": None, "label": None}
+    runs: dict[str, dict[str, Path]] = {}
+    for path in sorted(ROOT.glob("results/humaneval_plus_*.json")):
+        parts = path.stem.split("_")  # humaneval_plus_<label>_<mode>_<ts>
+        if len(parts) < 5 or parts[-2] not in ("bare", "harness"):
+            continue
+        label = "_".join(parts[2:-2])
+        runs.setdefault(label, {})[parts[-2]] = path
+    complete = [(lbl, modes) for lbl, modes in runs.items() if "bare" in modes and "harness" in modes]
+    chosen = max(complete, key=lambda item: item[1]["harness"].stat().st_mtime) if complete else None
+    if not chosen:
+        return out
+    out["label"] = chosen[0]
+    for mode, path in chosen[1].items():
+        obj, error = read_json(path)
+        if error or not isinstance(obj, dict):
+            warnings.append(error or f"{path.name}: not an object")
+            continue
+        summary = obj.get("summary") if isinstance(obj.get("summary"), dict) else obj
+        out[mode] = {"artifact": artifact_name(path), "n": summary.get("n") or summary.get("n_cases"),
+                     "pass_at_1": summary.get("pass_at_1"), "false_completion_rate": summary.get("false_completion_rate"),
+                     "honest_fail_rate": summary.get("honest_fail_rate"), "unknown_rate": summary.get("unknown_rate"),
+                     "evidence_rate": summary.get("evidence_rate"), "mean_tokens": summary.get("mean_tokens")}
+    return out
+
+
+def build_timeline(warnings: list[str]) -> list[dict[str, Any]]:
+    """Return one benchmark-run summary per saved timeline snapshot, for trend charts.
+
+    Reads every results/timeline_*.json file on disk, one point per file."""
+    points: list[dict[str, Any]] = []
+    for path in sorted(ROOT.glob("results/timeline_*.json")):
+        obj, error = read_json(path)
+        if error or not isinstance(obj, dict):
+            warnings.append(error or f"{path.name}: not an object")
+            continue
+        summary = obj.get("summary") or {}
+        points.append({"artifact": artifact_name(path), "label": obj.get("label"), "ran_at": obj.get("ran_at"),
+                       "n_active_lessons": obj.get("n_active_lessons"), "n_cases": summary.get("n_cases"),
+                       "mean_score": summary.get("mean_score"), "mistake_repetition_rate": summary.get("mistake_repetition_rate"),
+                       "false_completion_rate": summary.get("false_completion_rate"), "control_pass_rate": summary.get("control_pass_rate"),
+                       "per_family": {k: v.get("repetition_rate") for k, v in (obj.get("per_family") or {}).items() if isinstance(v, dict)}})
+    return points
+
+
 def main() -> None:
     warnings: list[str] = []
     ledger_path = ROOT / "ledger" / "ledger.jsonl"
@@ -352,6 +402,8 @@ def main() -> None:
             "trueforge_base_url": "http://localhost:8790/sessions/",
         },
         "spend": build_spend(),
+        "humaneval": build_humaneval(warnings),
+        "timeline": build_timeline(warnings),
         "warnings": warnings,
     }
     OUTPUT.parent.mkdir(parents=True, exist_ok=True)
