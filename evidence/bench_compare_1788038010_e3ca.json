@@ -1,0 +1,43 @@
+{
+  "lesson_id": "les_dcfd5506",
+  "worker_model": {
+    "name": "openai/gpt-5-4-mini",
+    "params": {
+      "reasoning_effort": "low"
+    }
+  },
+  "rule_text": "When the task asks for an artifact-backed current value, do not treat a summary, cache, or command output as evidence of that value unless it is demonstrably derived from the same current field and version; inspect and verify that field directly, reporting null or absence exactly. If the task explicitly asks for the command's printed output itself, report that output without substituting the artifact's value.",
+  "intervention_type": "check",
+  "before": {
+    "n_cases": 22,
+    "n_errors": 10,
+    "mean_score": 77.1,
+    "mistake_repetition_rate": 0.6,
+    "false_completion_rate": 0.0,
+    "control_pass_rate": 0.714,
+    "refusal_rate": 0.0,
+    "evidence_rate": 0.833,
+    "total_tokens": 55742
+  },
+  "after": {
+    "n_cases": 22,
+    "n_errors": 3,
+    "mean_score": 76.1,
+    "mistake_repetition_rate": 0.5,
+    "false_completion_rate": 0.053,
+    "control_pass_rate": 0.727,
+    "refusal_rate": 0.053,
+    "evidence_rate": 0.895,
+    "total_tokens": 111300
+  },
+  "decision": "revert",
+  "reasons": [
+    "before: 10/22 environment errors exceeds 20% - incomplete coverage",
+    "scored case counts differ between before and after - unequal coverage",
+    "false completions increased",
+    "refusal rate increased"
+  ],
+  "before_artifact": "results/reval_before_1788038010_d462.json",
+  "after_artifact": "results/reval_after_1788038010_9490.json",
+  "ran_at": "2026-08-29T14:13:30"
+}
