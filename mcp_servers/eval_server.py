@@ -326,8 +326,8 @@ def run_benchmark(rule_text: str, split: str = "", repeat: int = 1, intervention
         return g
 
     def work():
-        before = run_suite(candidate_manifest(""), cases, repeat, 3, "bench_before")
-        after = run_suite(candidate_manifest(rule_text, None, intervention_type), cases, repeat, 3, "bench_after")
+        before = run_suite(candidate_manifest(""), cases, repeat, 2, "bench_before")
+        after = run_suite(candidate_manifest(rule_text, None, intervention_type), cases, repeat, 2, "bench_after")
         bp, ap = _save("bench_before", before), _save("bench_after", after)
         d = decide(before["summary"], after["summary"])
         comp = {"before_artifact": bp, "after_artifact": ap, "before": before["summary"],
@@ -437,7 +437,7 @@ def run_timeline_point(label: str = "", split: str = "", repeat: int = 1) -> dic
         return g
 
     def work():
-        rep = run_suite(harness_manifest(lessons), cases, repeat, 3, "timeline")
+        rep = run_suite(harness_manifest(lessons), cases, repeat, 2, "timeline")
         point = {"label": label, "ts": time.time(), "ran_at": rep["ran_at"], "worker_model": worker_model(),
                  "n_active_lessons": len(lessons), "active_lessons": [{"id": L["id"], "family": L["family"],
                                                                           "type": L.get("intervention_type")} for L in lessons],
@@ -535,8 +535,8 @@ def _run_regression_sync(case_id: str, rule_text: str, base_artifact: str, repea
 
 def _run_benchmark_sync(rule_text: str, itype: str, repeat: int = 1) -> dict:
     cases = [c for c in C.CASES if c["split"] in ("holdout", "control")]
-    before = run_suite(candidate_manifest(""), cases, repeat, 3, "bench_before")
-    after = run_suite(candidate_manifest(rule_text, None, itype), cases, repeat, 3, "bench_after")
+    before = run_suite(candidate_manifest(""), cases, repeat, 2, "bench_before")
+    after = run_suite(candidate_manifest(rule_text, None, itype), cases, repeat, 2, "bench_after")
     bp, ap = _save("bench_before", before), _save("bench_after", after)
     d = decide(before["summary"], after["summary"])
     comp = {"before_artifact": bp, "after_artifact": ap, "before": before["summary"], "after": after["summary"],
