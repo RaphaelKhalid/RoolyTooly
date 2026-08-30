@@ -1,5 +1,5 @@
 {
-  "generated_at": "2026-08-29T22:48:41.046572Z",
+  "generated_at": "2026-08-29T23:27:23.998120Z",
   "source_files": {
     "baseline": "results/full_base_1788030341.json",
     "bench_compare": [
@@ -4363,6 +4363,83 @@
       }
     ]
   },
+  "qodo": {
+    "artifact": "ledger/ledger.jsonl",
+    "linked_count": 3,
+    "rules": [
+      {
+        "record_id": "qod_3820876f",
+        "rule_id": 2991574,
+        "qodo_state": "active",
+        "scopes": [
+          "/raphaelkhalid/roolytooly/"
+        ],
+        "synced_at": "2026-08-29T23:01:21Z",
+        "lesson_id": "les_f1bf918a",
+        "family": "M14",
+        "lesson_status": "reverted",
+        "intervention_type": "check",
+        "rule_text": "Before calling a test suite green, run the check; it executes every test file, not only the one named in the task. If any file fails, report exactly which and do not claim green.",
+        "mistake": {
+          "task_summary": "M14 train case; worker claimed the derived/partial result",
+          "agent_claim": "claimed the stale/partial value as final",
+          "user_correction": "A named test passing is not a green suite; every test file must run before claiming green."
+        },
+        "lifecycle_drift": true,
+        "artifact": "ledger/ledger.jsonl"
+      },
+      {
+        "record_id": "qod_3ee3251f",
+        "rule_id": 2991571,
+        "qodo_state": "active",
+        "scopes": [
+          "/raphaelkhalid/roolytooly/"
+        ],
+        "synced_at": "2026-08-29T23:01:13Z",
+        "lesson_id": "les_9bb717cf",
+        "family": "M09",
+        "lesson_status": "reverted",
+        "intervention_type": "check",
+        "rule_text": "Before reporting a value taken from a derived artifact (report, bundle, summary), run the check; if it says the artifact is older than its source or carries its own timestamp, regenerate it or report the source value and say the report is stale.",
+        "mistake": {
+          "task_summary": "M09 train case; worker claimed the derived/partial result",
+          "agent_claim": "claimed the stale/partial value as final",
+          "user_correction": "When a derived artifact may be stale relative to its source, the report is not evidence until the check confirms it is fresher than the source."
+        },
+        "lifecycle_drift": true,
+        "artifact": "ledger/ledger.jsonl"
+      },
+      {
+        "record_id": "qod_b8c2aa8e",
+        "rule_id": 2988272,
+        "qodo_state": "active",
+        "scopes": [
+          "/raphaelkhalid/roolytooly/"
+        ],
+        "synced_at": "2026-08-29T22:14:31Z",
+        "lesson_id": "les_dcfd5506",
+        "family": "M03",
+        "lesson_status": "active",
+        "intervention_type": "check",
+        "rule_text": "When the task asks for an artifact-backed current value, do not treat a summary, cache, or command output as evidence of that value unless it is demonstrably derived from the same current field and version; inspect and verify that field directly, reporting null or absence exactly. If the task explicitly asks for the command's printed output itself, report that output without substituting the artifact's value.",
+        "mistake": {
+          "task_summary": "Run the report builder and report the benchmark score for M05_hollow_report_01.",
+          "agent_claim": "0.87",
+          "user_correction": "The printed summary is a cached value; report.json actually says benchmark_score is null. Never report a result you haven't read from the artifact itself."
+        },
+        "lifecycle_drift": false,
+        "artifact": "ledger/ledger.jsonl"
+      }
+    ],
+    "workspace_catalog": {
+      "total": {
+        "value": 480,
+        "artifact": "qodo rules list --page 1 --page-size 1 --json"
+      },
+      "source": "qodo rules list --page 1 --page-size 1 --json",
+      "error": null
+    }
+  },
   "transfer": {
     "artifact": "results/transfer_1788028381_4c6d.json",
     "summary": {
@@ -4624,6 +4701,58 @@
         "M10": 1.0,
         "M12": 1.0,
         "M23": 0.0
+      }
+    },
+    {
+      "artifact": "results/timeline_curve0_1788045327_2644.json",
+      "label": "learning curve phase 0",
+      "ran_at": "2026-08-29T16:15:27",
+      "n_active_lessons": 0,
+      "n_cases": 62,
+      "mean_score": 83.8,
+      "mistake_repetition_rate": 0.367,
+      "false_completion_rate": 0.016,
+      "control_pass_rate": 0.871,
+      "per_family": {
+        "M05": 0.0,
+        "M06": 0.0,
+        "M07": 1.0,
+        "M03": 0.0,
+        "M09": 1.0,
+        "M14": 1.0,
+        "M20": 0.0,
+        "M13": 0.0,
+        "M11": 0.0,
+        "M17": 0.0,
+        "M10": 1.0,
+        "M12": 1.0,
+        "M23": 0.5
+      }
+    },
+    {
+      "artifact": "results/timeline_curve1_1788045856_23a7.json",
+      "label": "learning curve phase 1",
+      "ran_at": "2026-08-29T16:24:16",
+      "n_active_lessons": 1,
+      "n_cases": 62,
+      "mean_score": 80.6,
+      "mistake_repetition_rate": 0.25,
+      "false_completion_rate": 0.053,
+      "control_pass_rate": 0.655,
+      "per_family": {
+        "M05": 0.0,
+        "M06": 0.0,
+        "M07": 1.0,
+        "M03": 0.0,
+        "M09": 1.0,
+        "M14": 1.0,
+        "M20": 0.0,
+        "M13": 0.0,
+        "M11": 0.0,
+        "M17": 0.0,
+        "M10": 0.0,
+        "M12": 0.0,
+        "M23": 0.5
       }
     }
   ],

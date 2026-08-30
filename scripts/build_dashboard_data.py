@@ -9,6 +9,7 @@ missing or malformed.
 from __future__ import annotations
 
 import json
+import shutil
 import subprocess
 import sys
 from collections import Counter, defaultdict
@@ -277,6 +278,94 @@ def build_ledger(records: list[dict[str, Any]], statuses: dict[str, dict[str, An
     }
 
 
+def build_qodo_rules(
+    records: list[dict[str, Any]], statuses: dict[str, dict[str, Any]], artifact: str | None
+) -> dict[str, Any]:
+    """Build the mistake-to-Qodo rule list from append-only ledger mappings."""
+    lessons = {record.get("id"): record for record in records if record.get("kind") == "lesson"}
+    corrections = {record.get("id"): record for record in records if record.get("kind") == "correction"}
+    latest_mapping: dict[str, dict[str, Any]] = {}
+    for record in records:
+        lesson_id = record.get("lesson_id")
+        if (
+            record.get("kind") == "qodo_rule"
+            and isinstance(lesson_id, str)
+            and record.get("rule_id") is not None
+        ):
+            latest_mapping[lesson_id] = record
+
+    rows: list[dict[str, Any]] = []
+    for lesson_id, mapping in latest_mapping.items():
+        lesson = lessons.get(lesson_id) or {}
+        correction = corrections.get(lesson.get("correction_id")) or {}
+        status_record = statuses.get(lesson_id) or {}
+        lesson_status = status_record.get("status") or "candidate"
+        qodo_state = mapping.get("state")
+        rows.append(
+            {
+                "record_id": mapping.get("id"),
+                "rule_id": mapping.get("rule_id"),
+                "qodo_state": qodo_state,
+                "scopes": mapping.get("scopes") if isinstance(mapping.get("scopes"), list) else [],
+                "synced_at": mapping.get("ts"),
+                "lesson_id": lesson_id,
+                "family": lesson.get("family"),
+                "lesson_status": lesson_status,
+                "intervention_type": lesson.get("intervention_type"),
+                "rule_text": lesson.get("rule_text"),
+                "mistake": {
+                    "task_summary": correction.get("task_summary"),
+                    "agent_claim": correction.get("agent_claim"),
+                    "user_correction": correction.get("user_correction"),
+                },
+                "lifecycle_drift": qodo_state == "active" and lesson_status != "active",
+                "artifact": artifact,
+            }
+        )
+    rows.sort(key=lambda row: str(row.get("synced_at") or ""), reverse=True)
+    return {"artifact": artifact, "linked_count": len(rows), "rules": rows}
+
+
+def qodo_catalog_count() -> dict[str, Any]:
+    """Read the workspace rule total without making the dashboard depend on Qodo."""
+    source = "qodo rules list --page 1 --page-size 1 --json"
+    invocation: list[str] | None = None
+    qodo_module = Path.home() / ".qodo" / "bin" / "qodo.mjs"
+    node = shutil.which("node")
+    if qodo_module.exists() and node:
+        invocation = [node, str(qodo_module)]
+    elif qodo := shutil.which("qodo"):
+        invocation = [qodo]
+    if invocation is None:
+        return {"total": metric(None, source), "source": source, "error": "qodo CLI unavailable"}
+
+    try:
+        completed = subprocess.run(
+            [*invocation, "rules", "list", "--page", "1", "--page-size", "1", "--json"],
+            cwd=ROOT,
+            capture_output=True,
+            text=True,
+            timeout=20,
+            check=False,
+        )
+        if completed.returncode != 0:
+            return {"total": metric(None, source), "source": source, "error": "qodo catalog request failed"}
+        parsed = None
+        for line in completed.stdout.splitlines():
+            try:
+                candidate = json.loads(line)
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict) and "totalCount" in candidate:
+                parsed = candidate
+                break
+        if not isinstance(parsed, dict):
+            return {"total": metric(None, source), "source": source, "error": "qodo catalog response was unreadable"}
+        return {"total": metric(parsed.get("totalCount"), source), "source": source, "error": None}
+    except (OSError, subprocess.TimeoutExpired):
+        return {"total": metric(None, source), "source": source, "error": "qodo catalog request unavailable"}
+
+
 def build_spend() -> dict[str, Any]:
     command = "python -m harness.spend --json"
     try:
@@ -324,6 +413,89 @@ def build_benchmark_pair(prefix: str, warnings: list[str]) -> dict[str, Any]:
                      "pass_at_1": summary.get("pass_at_1"), "false_completion_rate": summary.get("false_completion_rate"),
                      "honest_fail_rate": summary.get("honest_fail_rate"), "unknown_rate": summary.get("unknown_rate"),
                      "evidence_rate": summary.get("evidence_rate"), "mean_tokens": summary.get("mean_tokens")}
+    return out
+
+
+def build_retrieval(warnings: list[str]) -> dict[str, Any]:
+    """Return the local-vs-Qodo rule retrieval speed comparison from the newest warm run.
+
+    results/retrieval_bench_*.json holds one benchmark per file: n queries compared,
+    local hybrid (BM25 + char n-gram + embeddings) vs Qodo rule search median latency,
+    and their top-3 agreement rate. Older files predate the embedding stage and lack
+    dense_status_counts; only a file with at least one successful dense lookup (ok > 0)
+    counts as the "warm" run the headline numbers come from. cold_ms_median, when
+    present, is the local median from the next-older dense-capable file — the closest
+    thing on disk to a first, unwarmed call."""
+    empty = {
+        "artifact": None,
+        "local_ms_median": None,
+        "qodo_ms_median": None,
+        "speedup": None,
+        "agreement_rate": None,
+        "overlap_rate": None,
+        "compared": None,
+        "n": None,
+        "lessons_indexed": None,
+        "embedding_model": None,
+    }
+    dense_runs: list[tuple[Path, dict[str, Any]]] = []
+    for path in sorted(ROOT.glob("results/retrieval_bench_*.json")):
+        obj, error = read_json(path)
+        if error:
+            warnings.append(error)
+            continue
+        if not isinstance(obj, dict):
+            warnings.append(f"{path.name}: not an object")
+            continue
+        if isinstance(obj.get("dense_status_counts"), dict):
+            dense_runs.append((path, obj))
+
+    warm_index: int | None = None
+    for i, (_, obj) in enumerate(dense_runs):
+        counts = obj.get("dense_status_counts") or {}
+        ok = counts.get("ok")
+        if isinstance(ok, (int, float)) and ok > 0:
+            warm_index = i  # keep overwriting so the last (newest) match wins
+    if warm_index is None:
+        return empty
+
+    path, obj = dense_runs[warm_index]
+    local_ms = obj.get("local_ms_median")
+    qodo_ms = obj.get("qodo_ms_median")
+    speedup = round(qodo_ms / local_ms, 2) if isinstance(local_ms, (int, float)) and local_ms and isinstance(qodo_ms, (int, float)) else None
+
+    # agreement_rate (from the file) is exact top-k SET equality, which is
+    # harsh when Qodo returns fewer rules than our top_k — overlap_rate is
+    # the gentler, more honest number: the share of compared rows where the
+    # two result sets share at least one rule.
+    overlap = 0
+    compared = 0
+    for row in obj.get("rows") or []:
+        if not isinstance(row, dict) or row.get("status") != "ok":
+            continue
+        local_ids = row.get("local") if isinstance(row.get("local"), list) else []
+        qodo_ids = row.get("qodo") if isinstance(row.get("qodo"), list) else []
+        compared += 1
+        if set(local_ids) & set(qodo_ids):
+            overlap += 1
+    overlap_rate = round(overlap / compared, 3) if compared else None
+
+    out: dict[str, Any] = {
+        "artifact": artifact_name(path),
+        "local_ms_median": local_ms,
+        "qodo_ms_median": qodo_ms,
+        "speedup": speedup,
+        "agreement_rate": obj.get("agreement_rate"),
+        "overlap_rate": overlap_rate,
+        "compared": compared or None,
+        "n": obj.get("n"),
+        "lessons_indexed": obj.get("lessons_indexed"),
+        "embedding_model": obj.get("embedding_model"),
+    }
+    if warm_index > 0:
+        cold_ms = dense_runs[warm_index - 1][1].get("local_ms_median")
+        if cold_ms is not None:
+            out["cold_ms_median"] = cold_ms
     return out
 
 
@@ -395,6 +567,10 @@ def main() -> None:
         "board": board,
         "interventions": build_interventions(board, regress_pairs, lessons),
         "ledger": build_ledger(ledger_records, statuses, artifact_name(ledger_path)),
+        "qodo": {
+            **build_qodo_rules(ledger_records, statuses, artifact_name(ledger_path)),
+            "workspace_catalog": qodo_catalog_count(),
+        },
         "transfer": {
             "artifact": artifact_name(transfer_path),
             "summary": (transfer_obj or {}).get("summary") if isinstance(transfer_obj, dict) else {},
@@ -404,6 +580,7 @@ def main() -> None:
         "spend": build_spend(),
         "humaneval": build_benchmark_pair("humaneval_plus", warnings),
         "livecodebench": build_benchmark_pair("livecodebench", warnings),
+        "retrieval": build_retrieval(warnings),
         "timeline": build_timeline(warnings),
         "warnings": warnings,
     }
