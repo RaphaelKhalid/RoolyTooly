@@ -1,0 +1,53 @@
+{
+  "lessons": [
+    "les_dcfd5506",
+    "les_9bb717cf",
+    "les_f1bf918a"
+  ],
+  "series": [
+    {
+      "phase": 0,
+      "artifact": "results/timeline_curve0_1788045327_2644.json",
+      "n_cases": 62,
+      "n_errors": 1,
+      "mean_score": 83.8,
+      "mistake_repetition_rate": 0.367,
+      "false_completion_rate": 0.016,
+      "control_pass_rate": 0.871,
+      "refusal_rate": 0.016
+    },
+    {
+      "phase": 1,
+      "artifact": "results/timeline_curve1_1788045856_23a7.json",
+      "n_cases": 62,
+      "n_errors": 5,
+      "mean_score": 80.6,
+      "mistake_repetition_rate": 0.25,
+      "false_completion_rate": 0.053,
+      "control_pass_rate": 0.655,
+      "refusal_rate": 0.0
+    },
+    {
+      "phase": 2,
+      "artifact": "results/timeline_curve2_1788046467_1cbd.json",
+      "n_cases": 62,
+      "n_errors": 4,
+      "mean_score": 79.2,
+      "mistake_repetition_rate": 0.259,
+      "false_completion_rate": 0.017,
+      "control_pass_rate": 0.613,
+      "refusal_rate": 0.0
+    },
+    {
+      "phase": 3,
+      "artifact": "results/timeline_curve3_1788047115_53dc.json",
+      "n_cases": 62,
+      "n_errors": 0,
+      "mean_score": 76.4,
+      "mistake_repetition_rate": 0.167,
+      "false_completion_rate": 0.016,
+      "control_pass_rate": 0.438,
+      "refusal_rate": 0.016
+    }
+  ]
+}

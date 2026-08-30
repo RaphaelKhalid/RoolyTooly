@@ -34,3 +34,4 @@ filename it cites can be found in this directory once bundled.
 - `evidence/timeline_1788036106_524c.json` (12.6 KiB) -- label='round 2' ran_at=2026-08-29T13:41:46 n_cases=31 n_errors=1 mean_score=86.8 mistake_repetition_rate=0.214 n_active_lessons=1
 - `evidence/timeline_1788037127_4644.json` (12.6 KiB) -- label='round 2' ran_at=2026-08-29T13:58:47 n_cases=31 n_errors=6 mean_score=82.0 mistake_repetition_rate=0.5 n_active_lessons=1
 - `evidence/transfer_1788028381_4c6d.json` (3.0 KiB) -- label='transfer' ran_at=2026-08-29T11:33:01 n_cases=1 n_errors=0 mean_score=100.0 mistake_repetition_rate=0.0 false_completion_rate=0.0 control_pass_rate=0.0
+- [Learning curve](learning_curve_1788047115.json) + [controls re-run after PR 14](learning_curve_controls_rerun.json) — repetition 0.367→0.167 over 3 lessons; controls 0.87→0.44→0.75 after check/scorer fixes; see docs/learning_curve.md
