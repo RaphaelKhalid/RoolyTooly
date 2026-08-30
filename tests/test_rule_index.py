@@ -339,3 +339,167 @@ def test_select_records_a_local_receipt_when_qodo_is_unavailable(tmp_path, monke
     assert local["selected"] == ["L1"]  # BM25 + n-gram still selected a lesson
     assert local["hits"][0]["gate"] == "not_evaluated"
     assert doc["retrieval"]["dense_status_counts"] == {"error": 1}
+
+
+# ---- PR 12 review: malformed vectors must never look healthy -----------------------------------
+
+def _resp(body: bytes):
+    """Build a minimal stand-in for the object urlopen returns."""
+    class _R:
+        def read(self):
+            return body
+
+        def close(self):
+            return None
+    return _R()
+
+
+@pytest.mark.parametrize("bad", ["NaN", "Infinity", "-Infinity", '"0.5"', "null"])
+def test_non_finite_vector_from_the_response_degrades_to_error(tmp_path, monkeypatch, bad):
+    monkeypatch.setattr(R, "embedding_api_key", lambda repo_root=R.ROOT: "sk-x")
+    cache = tmp_path / "emb"
+    body = ('{"data": [{"index": 0, "embedding": [0.5, ' + bad + "]}]}").encode()
+    vectors, status, error = R.embed_texts(["hello"], repo_root=tmp_path, cache_dir=cache,
+                                           opener=lambda req, timeout=None: _resp(body))
+    assert (vectors, status) == ({}, "error")
+    assert "finite numeric vector" in error
+    assert list(cache.glob("*.json")) == []  # a rejected vector is never persisted
+
+
+def test_mismatched_dimensions_in_one_response_degrade_to_error(tmp_path, monkeypatch):
+    monkeypatch.setattr(R, "embedding_api_key", lambda repo_root=R.ROOT: "sk-x")
+    cache = tmp_path / "emb"
+    body = json.dumps({"data": [{"index": 0, "embedding": [0.5, 0.5]},
+                                {"index": 1, "embedding": [0.5, 0.5, 0.5]}]}).encode()
+    _, status, error = R.embed_texts(["a", "b"], repo_root=tmp_path, cache_dir=cache,
+                                     opener=lambda req, timeout=None: _resp(body))
+    assert status == "error" and "dimensions are inconsistent" in error
+    # a batch that failed validation is never persisted, so the next call retries cleanly
+    assert list(cache.glob("*.json")) == []
+
+
+def test_a_fresh_vector_of_another_dimension_than_the_cache_degrades(tmp_path, monkeypatch):
+    monkeypatch.setattr(R, "embedding_api_key", lambda repo_root=R.ROOT: "sk-x")
+    cache = tmp_path / "emb"
+    cache.mkdir(parents=True)
+    digest = R.embedding_cache_key("a")
+    (cache / f"{digest}.json").write_text(json.dumps(
+        {"model": R.EMBEDDING_MODEL, "sha256": digest, "dimensions": 2, "vector": [1.0, 0.0]}),
+        encoding="utf-8")
+    body = json.dumps({"data": [{"index": 0, "embedding": [0.1, 0.2, 0.3]}]}).encode()
+    _, status, error = R.embed_texts(["a", "b"], repo_root=tmp_path, cache_dir=cache,
+                                     opener=lambda req, timeout=None: _resp(body))
+    assert status == "error" and "dimensions are inconsistent" in error
+
+
+@pytest.mark.parametrize("vector", [[0.5, float("nan")], [0.5, float("inf")], [0.5, "x"], []])
+def test_corrupt_cache_vectors_are_rejected_not_used(tmp_path, vector):
+    cache = tmp_path / "emb"
+    cache.mkdir(parents=True)
+    digest = R.embedding_cache_key("hello")
+    (cache / f"{digest}.json").write_text(json.dumps(
+        {"model": R.EMBEDDING_MODEL, "sha256": digest, "dimensions": len(vector), "vector": vector}),
+        encoding="utf-8")
+    _, status, _ = R.embed_texts(["hello"], repo_root=tmp_path, cache_dir=cache)
+    assert status == "missing_key"  # the entry was rejected, so a fresh call was required
+    assert R.cache_stats()["cache_misses"] == 1
+
+
+def test_ragged_cache_entries_degrade_instead_of_reporting_ok(tmp_path):
+    cache = tmp_path / "emb"
+    cache.mkdir(parents=True)
+    for text, vector in (("a", [1.0, 0.0]), ("b", [1.0, 0.0, 0.0])):
+        digest = R.embedding_cache_key(text)
+        (cache / f"{digest}.json").write_text(json.dumps(
+            {"model": R.EMBEDDING_MODEL, "sha256": digest, "dimensions": len(vector),
+             "vector": vector}), encoding="utf-8")
+    _, status, error = R.embed_texts(["a", "b"], repo_root=tmp_path, cache_dir=cache)
+    assert status == "error" and "cached embedding dimensions are inconsistent" in error
+
+
+def test_dimension_mismatch_degrades_retrieval_rather_than_scoring_zeros(tmp_path, monkeypatch):
+    monkeypatch.setattr(R, "embedding_api_key", lambda repo_root=R.ROOT: "sk-x")
+    sizes = iter([2, 3, 3, 3])
+
+    def opener(req, timeout=None):
+        rows = [{"index": n, "embedding": [0.1] * next(sizes)}
+                for n in range(len(json.loads(req.data.decode("utf-8"))["input"]))]
+        return _resp(json.dumps({"data": rows}).encode())
+
+    def embedder(texts, **kw):
+        return R.embed_texts(texts, repo_root=tmp_path, cache_dir=tmp_path / "emb", opener=opener)
+
+    res = R.retrieve_lessons(ARTIFACT_QUERY, LESSONS, limit=3, embedder=embedder)
+    assert res.dense_status == "error"
+    assert res.lesson_ids == ["L1"]  # lexical selection survives; no silent 0.0-cosine ranking
+    assert all(h.cosine is None for h in res.hits)
+
+
+# ---- PR 12 review: the receipt cosine and the gate decision must agree --------------------------
+
+def test_receipt_quotes_the_unrounded_cosine_the_gate_compared():
+    below = 0.41996
+    assert round(below, 4) == 0.42  # rounding alone would flip the verdict
+    vecs = lesson_vectors([1.0, 0.0], [[0.0, 1.0], [below, (1 - below ** 2) ** 0.5], [0.0, 1.0]])
+
+    blocked = R.retrieve_lessons(ARTIFACT_QUERY, LESSONS, limit=3, cosine_threshold=0.42,
+                                 embedder=stub_embedder(vecs))
+    assert blocked.dense_status == "ok" and "L2" not in blocked.lesson_ids
+
+    admitted = R.retrieve_lessons(ARTIFACT_QUERY, LESSONS, limit=3, cosine_threshold=below,
+                                  embedder=stub_embedder(vecs))
+    hit = {h.lesson_id: h for h in admitted.hits}["L2"]
+    assert hit.gate == "passed" and hit.channels_fired == ["char_ngram", "dense"]
+    assert hit.cosine == pytest.approx(below, abs=1e-12)
+    assert hit.cosine != 0.42
+    assert hit.receipt()["cosine"] == hit.cosine  # the receipt is not rounded away from the gate
+
+
+# ---- PR 12 review: the compatibility wrappers stay local-only ----------------------------------
+
+def test_score_and_select_never_reach_the_network_even_with_a_key(monkeypatch):
+    monkeypatch.setattr(R, "embedding_api_key", lambda repo_root=R.ROOT: "sk-present")
+
+    def forbidden(*a, **kw):
+        raise AssertionError("the local-only wrappers must not open a connection")
+
+    monkeypatch.setattr(R.urllib.request, "urlopen", forbidden)
+    index = R.LessonIndex(LESSONS)
+
+    assert index.select(ARTIFACT_QUERY) == ["L1"]
+    assert index.score(ARTIFACT_QUERY)[0][1]["id"] == "L1"
+    assert index.retrieve(ARTIFACT_QUERY, dense=False).dense_status == "not_run"
+    # the explicit API does opt in: it reaches the forbidden opener and degrades on it
+    opted_in = index.retrieve(ARTIFACT_QUERY)
+    assert opted_in.dense_status == "error"
+    assert opted_in.lesson_ids == ["L1"]
+
+
+def test_local_only_wrappers_call_no_embedder_at_all():
+    calls = []
+    index = R.LessonIndex(LESSONS)
+    embedder = stub_embedder(lesson_vectors([1.0, 0.0], [[1.0, 0.0]] * 3), calls=calls)
+    index.select(ARTIFACT_QUERY, embedder=embedder)
+    index.score(ARTIFACT_QUERY, embedder=embedder)
+    assert calls == []
+    index.retrieve(ARTIFACT_QUERY, embedder=embedder)
+    assert len(calls) == 1
+
+
+def test_harness_path_still_opts_into_the_dense_channel(tmp_path, monkeypatch):
+    ledger = tmp_path / "ledger.jsonl"
+    ledger.write_text("\n".join(
+        json.dumps(r) for L in LESSONS for r in (
+            {"kind": "lesson", **L}, {"kind": "status", "lesson_id": L["id"], "status": "active"})),
+        encoding="utf-8")
+    index_path = tmp_path / "lesson_index.json"
+    monkeypatch.setattr(Q, "LEDGER", ledger)
+    monkeypatch.setattr(Q, "INDEX", index_path)
+    monkeypatch.setattr(Q.C, "CASES", [{"id": "CASE_C", "task": f"Then: {ARTIFACT_QUERY}"}])
+    monkeypatch.setattr(Q, "_qodo", lambda *a, **kw: {"rules": []})
+    calls = []
+    Q.select(top_k=3, embedder=stub_embedder(
+        lesson_vectors([1.0, 0.0], [[1.0, 0.0], [0.0, 1.0], [0.0, 1.0]]), calls=calls))
+    assert len(calls) == 1  # qodo_lessons.select still opts in
+    doc = json.loads(index_path.read_text(encoding="utf-8"))
+    assert doc["receipts"]["CASE_C"]["local"]["dense_status"] == "ok"
