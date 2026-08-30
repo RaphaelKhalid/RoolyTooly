@@ -1,4 +1,4 @@
-"""Import the bugs Qodo's PR reviewer caught in THIS repository as ledger observations.
+"""Import bugs the Qodo PR reviewer caught here as ledger observations.
 
 The Bright Data mining channel (Workflow C) turns other people's agent mistakes, found on the
 web, into `observation` records. This module is the same channel pointed at ourselves: every
@@ -10,7 +10,10 @@ Usage:
     python -m harness.qodo_findings --dry-run          # print the table; touch nothing
     python -m harness.qodo_findings                    # import into the ledger (idempotent)
     python -m harness.qodo_findings --propose          # also write results/qodo_rule_proposals.json
-    python -m harness.qodo_findings --dry-run --propose
+    python -m harness.qodo_findings --dry-run --propose # preview the proposals; write no file
+
+`--dry-run` is non-mutating in every combination: it writes neither the ledger nor the proposals
+artifact, it only prints what a real run would produce.
 
 Source: `gh api --paginate` (stdlib subprocess, no new dependencies) over
     repos/<repo>/pulls/comments?per_page=100     (inline review findings)
@@ -29,12 +32,15 @@ the existing compile -> falsify -> regression -> benchmark -> approval path befo
 from __future__ import annotations
 
 import argparse
+import contextlib
 import html
 import importlib.util
 import json
+import os
 import re
 import subprocess
 import sys
+import time
 import types
 from pathlib import Path
 
@@ -102,7 +108,11 @@ def _install_fake_mcp() -> None:
 
 
 def ledger_module():
-    """Import mcp_servers.ledger_server (honouring ROOLY_LEDGER_DIR, which it reads at import)."""
+    """Load the ledger server module the observations are written through.
+
+    It resolves ROOLY_LEDGER_DIR at import time, so this is also what decides which ledger file
+    an import lands in.
+    """
     _install_fake_mcp()
     import mcp_servers.ledger_server as ls  # noqa: PLC0415  (deliberately late: needs the shim)
     return ls
@@ -158,7 +168,11 @@ UNCLASSIFIED = "UNCLASSIFIED"
 
 
 def classify(text: str) -> str:
-    """Map a finding's text to a mistake family with a keyword heuristic. Never guesses blindly."""
+    """Guess which mistake family a finding belongs to from its wording.
+
+    A first-match-wins keyword heuristic, nothing more; text that matches no keyword returns
+    UNCLASSIFIED rather than a family the table does not actually support.
+    """
     low = (text or "").lower()
     for fam, keywords in FAMILY_KEYWORDS:
         for kw in keywords:
@@ -276,7 +290,11 @@ def parse_comment(comment: dict) -> dict | None:
 # ---- fetching ----------------------------------------------------------------------------------
 
 def _gh_api(endpoint: str) -> list[dict]:
-    """`gh api --paginate <endpoint>` -> list of JSON objects. Tolerates concatenated arrays."""
+    """Call one paginated GitHub API endpoint and return its JSON objects.
+
+    Runs `gh api --paginate <endpoint>`, tolerating both a single merged array and the one
+    array per page some `gh` versions emit.
+    """
     proc = subprocess.run(["gh", "api", "--paginate", endpoint],
                           capture_output=True, text=True, encoding="utf-8", errors="replace")
     if proc.returncode != 0:
@@ -303,7 +321,10 @@ def _gh_api(endpoint: str) -> list[dict]:
 
 
 def fetch_comments(repo: str = REPO) -> list[dict]:
-    """All review + issue comments on the repo's PRs (unfiltered; caller filters to Qodo)."""
+    """Fetch every review and issue comment on the repository's pull requests.
+
+    The result is unfiltered; the caller narrows it to Qodo's comments.
+    """
     return (_gh_api(f"repos/{repo}/pulls/comments?per_page=100")
             + _gh_api(f"repos/{repo}/issues/comments?per_page=100"))
 
@@ -338,6 +359,47 @@ def existing_import_keys(ls) -> set[str]:
     return keys
 
 
+LOCK_TIMEOUT_S = 30.0
+LOCK_POLL_S = 0.02
+
+
+@contextlib.contextmanager
+def import_lock(ls, timeout: float = LOCK_TIMEOUT_S):
+    """Hold an exclusive lock over the whole read-check-append import transaction.
+
+    The ledger's own `_LOCK` serialises one append at a time within one process, which is not
+    enough here: the importer reads the existing import keys and only then appends, so two
+    concurrent imports could each observe a key as absent and write the same observation twice.
+    An O_EXCL lock file next to the ledger closes that window across processes as well, and the
+    in-process RLock is held inside it so threads serialise too. A lock older than the timeout is
+    treated as abandoned by a crashed run and broken, so a stale file cannot wedge the importer.
+    """
+    lock_path = ls.LOG.parent / ".qodo_import.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    deadline = time.monotonic() + timeout
+    fd = None
+    while fd is None:
+        try:
+            fd = os.open(str(lock_path), os.O_CREAT | os.O_EXCL | os.O_WRONLY)
+        except FileExistsError:
+            if time.monotonic() > deadline:
+                try:  # the holder is gone or wedged; reclaim the lock rather than fail forever
+                    lock_path.unlink()
+                except OSError:
+                    pass
+                deadline = time.monotonic() + timeout
+            time.sleep(LOCK_POLL_S)
+    try:
+        with ls._LOCK:
+            yield
+    finally:
+        os.close(fd)
+        try:
+            lock_path.unlink()
+        except OSError:
+            pass
+
+
 def _surface(f: dict) -> str:
     loc = f.get("path") or "repo"
     if f.get("line"):
@@ -346,9 +408,21 @@ def _surface(f: dict) -> str:
 
 
 def import_findings(findings: list[dict], dry_run: bool = False) -> dict:
-    """Write each finding to the ledger via ledger_server.record_observation. Idempotent."""
+    """Record each finding as a ledger observation, skipping ones already there.
+
+    Idempotent by `import_key`; the read-check-append runs under `import_lock` so concurrent
+    imports cannot both decide the same finding is new. A dry run writes nothing at all.
+    """
     ls = ledger_module()
-    known = existing_import_keys(ls)
+    if dry_run:
+        return _import_findings_locked(ls, findings, dry_run=True)
+    with import_lock(ls):
+        return _import_findings_locked(ls, findings, dry_run=False)
+
+
+def _import_findings_locked(ls, findings: list[dict], dry_run: bool) -> dict:
+    """Do the import itself, assuming the caller already holds the import lock."""
+    known = existing_import_keys(ls)  # re-read INSIDE the lock, never a stale snapshot
     imported, skipped, errors = [], [], []
     for f in findings:
         if f["import_key"] in known:
@@ -456,8 +530,67 @@ def write_proposals(doc: dict, path: Path = PROPOSALS_PATH) -> Path:
     return path
 
 
+_SURFACE_RE = re.compile(r"on PR #(\d+) at (.+?)(?::(\d+))?$")
+
+
+def findings_from_ledger(ls=None) -> list[dict]:
+    """Rebuild the finding list from the Qodo observations already in the ledger.
+
+    Reads the ledger the ledger module resolves (so ROOLY_LEDGER_DIR is honoured) and keeps the
+    records whose import_key starts with 'qodo:'. This is what lets the proposals be recomputed
+    from live state instead of trusting a previously written artifact.
+    """
+    ls = ls or ledger_module()
+    findings: list[dict] = []
+    if not ls.LOG.exists():
+        return findings
+    for line in ls.LOG.read_text(encoding="utf-8", errors="replace").splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            r = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        key = str((r or {}).get("import_key") or "")
+        if not isinstance(r, dict) or r.get("kind") != "observation" or not key.startswith("qodo:"):
+            continue
+        family = str(r.get("family") or UNCLASSIFIED)
+        if family == "NEW:qodo-unclassified":
+            family = UNCLASSIFIED
+        quote = str(r.get("quote") or "")
+        m = _SURFACE_RE.search(str(r.get("surface") or ""))
+        findings.append({
+            "comment_id": key.split(":", 1)[1],
+            "import_key": key,
+            "family": family,
+            "quote": quote,
+            "title": quote.split(". ", 1)[0] if ". " in quote else quote,
+            "html_url": str(r.get("source_url") or ""),
+            "pr_number": int(m.group(1)) if m else None,
+            "path": (m.group(2) if m and m.group(2) != "repo" else None),
+            "line": (int(m.group(3)) if m and m.group(3) else None),
+        })
+    return findings
+
+
+def proposals_from_ledger(min_findings: int = MIN_FINDINGS_PER_FAMILY, ls=None) -> dict:
+    """Recompute the candidate rules from the Qodo observations now in the ledger.
+
+    Same grouping as `propose_rules`, but sourced from live ledger state rather than from
+    results/qodo_rule_proposals.json, so it can never report counts from an earlier import.
+    """
+    doc = propose_rules(findings_from_ledger(ls), min_findings)
+    doc["computed_from"] = "ledger"
+    return doc
+
+
 def load_proposals(path: Path = PROPOSALS_PATH) -> dict:
-    """Read back the last written proposals document, or an empty shape if there is none."""
+    """Read back the proposals artifact a previous CLI run wrote.
+
+    Returns an empty shape when the file does not exist. Prefer `proposals_from_ledger` when
+    the answer has to reflect the current ledger.
+    """
     if not path.exists():
         return {"proposals": [], "per_family": {}, "total_findings": 0,
                 "note": "no proposals file yet; run harness/qodo_findings.py --propose"}
@@ -523,8 +656,13 @@ def main(argv: list[str] | None = None) -> int:
 
     if args.propose:
         doc = propose_rules(findings, args.min_findings)
-        p = write_proposals(doc)
-        print(f"\nWrote {len(doc['proposals'])} candidate rule proposal(s) to results/{p.name}")
+        if args.dry_run:
+            # --dry-run is non-mutating in every combination: preview only, no artifact written.
+            print(f"\n[dry run] {len(doc['proposals'])} candidate rule proposal(s); "
+                  f"results/{PROPOSALS_PATH.name} NOT written")
+        else:
+            p = write_proposals(doc)
+            print(f"\nWrote {len(doc['proposals'])} candidate rule proposal(s) to results/{p.name}")
         for pr in doc["proposals"]:
             print(f"  {pr['family']} (n={pr['n_findings']}): {_truncate(pr['rule_text'], 100)}")
     return 0

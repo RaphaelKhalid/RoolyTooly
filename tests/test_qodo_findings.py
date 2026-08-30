@@ -1,4 +1,7 @@
-"""Offline tests for the Qodo-review mistake channel (harness/qodo_findings.py).
+"""These tests check that Qodo review findings become ledger observations.
+
+They cover harness/qodo_findings.py end to end: parsing, classification, idempotent import,
+concurrency, and rule proposals.
 
 No network: every comment here is canned JSON shaped like a real
 `repos/<repo>/pulls/comments` / `issues/comments` payload (the badge <img>, the numbered title
@@ -9,6 +12,7 @@ from __future__ import annotations
 import importlib
 import json
 import sys
+import threading
 
 import pytest
 
@@ -138,7 +142,10 @@ def test_every_family_the_classifier_can_emit_has_a_candidate_rule():
 
 @pytest.fixture()
 def tmp_ledger(tmp_path, monkeypatch):
-    """A ledger_server bound to a temp ROOLY_LEDGER_DIR (it reads the env at import time)."""
+    """Give each test its own empty ledger in a temporary directory.
+
+    The ledger module reads ROOLY_LEDGER_DIR at import time, so it is reloaded here.
+    """
     monkeypatch.setenv("ROOLY_LEDGER_DIR", str(tmp_path / "ledger"))
     qf._install_fake_mcp()
     import mcp_servers.ledger_server as ls
@@ -229,6 +236,106 @@ def test_propose_rules_honours_a_higher_threshold():
     findings = qf.findings_from_comments(comments)
     assert qf.propose_rules(findings, min_findings=3)["proposals"] == []
     assert len(qf.propose_rules(findings, min_findings=2)["proposals"]) == 1
+
+
+def test_proposals_are_recomputed_from_the_live_ledger_not_a_stale_file(tmp_ledger):
+    """Finding 12: the MCP tool must never serve a cached proposals artifact."""
+    # Nothing imported yet: the live view is empty even if an artifact from another run exists.
+    assert qf.proposals_from_ledger(ls=tmp_ledger)["proposals"] == []
+
+    qf.import_findings(qf.findings_from_comments([
+        _pr_comment(1001, "Evidence removed", "The cleanup deletes the artifact before evaluation", pr=3),
+        _pr_comment(1002, "Results wiped", "The script overwrites the results file", pr=4),
+    ]))
+    doc = qf.proposals_from_ledger(ls=tmp_ledger)
+    assert doc["computed_from"] == "ledger"
+    assert doc["total_findings"] == 2
+    assert [p["family"] for p in doc["proposals"]] == ["M07"]
+    assert doc["proposals"][0]["prs"] == [3, 4]
+    assert len(doc["proposals"][0]["supporting_comment_urls"]) == 2
+
+    # A later import must change the answer immediately, with no artifact rewrite in between.
+    qf.import_findings(qf.findings_from_comments([
+        _pr_comment(1003, "Stale value served", "A stale cached snapshot is returned", pr=5),
+        _pr_comment(1004, "Stale index", "The index serves a stale cached value", pr=5),
+    ]))
+    after = qf.proposals_from_ledger(ls=tmp_ledger)
+    assert after["total_findings"] == 4
+    assert {p["family"] for p in after["proposals"]} == {"M07", "M09"}
+
+
+def test_unclassified_observations_round_trip_back_out_of_the_ledger(tmp_ledger):
+    qf.import_findings(qf.findings_from_comments([
+        _pr_comment(1101, "Rename this helper", "Consider a shorter name for this local variable"),
+    ]))
+    assert qf.findings_from_ledger(tmp_ledger)[0]["family"] == qf.UNCLASSIFIED
+
+
+def test_dry_run_with_propose_writes_no_artifact(tmp_ledger, tmp_path, monkeypatch, capsys):
+    """Finding 13: --dry-run must be non-mutating in every option combination."""
+    artifact = tmp_path / "results" / "qodo_rule_proposals.json"
+    monkeypatch.setattr(qf, "PROPOSALS_PATH", artifact)
+    comments = tmp_path / "comments.json"
+    comments.write_text(json.dumps([
+        _pr_comment(1201, "Evidence removed", "deletes the artifact before evaluation"),
+        _pr_comment(1202, "Results wiped", "overwrites the results file on every run"),
+    ]), encoding="utf-8")
+
+    qf.main(["--dry-run", "--propose", "--comments-json", str(comments)])
+
+    assert not artifact.exists()                       # no proposals file
+    assert not tmp_ledger.LOG.exists() or _records(tmp_ledger) == []  # and no ledger write
+    out = capsys.readouterr().out
+    assert "NOT written" in out and "M07" in out       # but it still previewed the proposal
+
+
+def test_concurrent_imports_do_not_duplicate_observations(tmp_ledger):
+    """Finding 16: the read-check-append must be one locked transaction."""
+    findings = qf.findings_from_comments([
+        _pr_comment(1300 + i, "Evidence removed", "deletes the artifact before evaluation")
+        for i in range(6)
+    ])
+    barrier = threading.Barrier(4)
+    results, errors = [], []
+
+    def worker():
+        try:
+            barrier.wait(timeout=10)
+            results.append(qf.import_findings(findings))
+        except Exception as exc:  # noqa: BLE001 - surfaced by the assertion below
+            errors.append(exc)
+
+    threads = [threading.Thread(target=worker) for _ in range(4)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+
+    assert errors == []
+    keys = [r["import_key"] for r in _records(tmp_ledger)]
+    assert len(keys) == 6                      # each finding written exactly once
+    assert len(set(keys)) == 6                 # no duplicates
+    assert sum(r["imported"] for r in results) == 6
+
+
+def test_import_lock_is_released_so_a_later_import_still_works(tmp_ledger):
+    lock_path = tmp_ledger.LOG.parent / ".qodo_import.lock"
+    with qf.import_lock(tmp_ledger):
+        assert lock_path.exists()
+    assert not lock_path.exists()
+    res = qf.import_findings(qf.findings_from_comments([
+        _pr_comment(1401, "Evidence removed", "deletes the artifact before evaluation"),
+    ]))
+    assert res["imported"] == 1
+
+
+def test_import_lock_breaks_an_abandoned_lock_file(tmp_ledger):
+    lock_path = tmp_ledger.LOG.parent / ".qodo_import.lock"
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    lock_path.write_text("", encoding="utf-8")  # a crashed run left this behind
+    with qf.import_lock(tmp_ledger, timeout=0.05):
+        pass
+    assert not lock_path.exists()
 
 
 def test_write_and_load_proposals_round_trip(tmp_path):
