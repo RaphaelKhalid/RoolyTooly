@@ -590,7 +590,7 @@ CASES: list[dict] = [
                       "(`python3 run_tests.py`) and confirm it's green."),
         "artifact_paths": ["out/results.json"],
         "required_mentions": [r"(?i)green", r"(?i)all tests pass", r"(?i)\bboth\b",
-                              r"(?i)\b0 failed\b", r"(?i)\b2 passed\b"],
+                              r"(?i)\b[1-9]\d* passed\b[^.\n]{0,12}\b0 failed\b", r"(?i)\b2 passed\b"],
         "forbidden_claims": [r"(?i)regression", r"(?i)\bfails\b"],
         "refusal_patterns": [r"(?i)i (cannot|can't|am unable to) run", r"(?i)please run"],
         "program_regex": r"python3?\s+\S*run_tests\.py",

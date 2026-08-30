@@ -1,4 +1,8 @@
-"""Regressions from learning-curve phase 3: controls were docked by check/scorer false positives."""
+"""Regression tests for false positives in the pre-claim checks and scorer.
+
+Control cases (tasks with nothing wrong) were being docked because a check called a
+fresh report stale, and because the scorer counted denied problems ("no violations")
+as claims of those problems."""
 import importlib.util
 import os
 import subprocess
@@ -27,6 +31,23 @@ def test_negated_forbidden_claim_does_not_count():
     assert _any([r"(?i)violation"], "Found 3 violations.", skip_negated=True) == [r"(?i)violation"]
     # default behaviour unchanged for required mentions
     assert _any([r"(?i)violation"], "no violations") == [r"(?i)violation"]
+
+
+def test_negation_does_not_scope_past_a_conjunction_or_clause():
+    assert _any([r"(?i)regression"], "no errors but regression remains", skip_negated=True)
+    assert _any([r"(?i)regression"], "0 failed; one regression remains", skip_negated=True)
+    assert _any([r"(?i)regression"], "no errors, and a regression remains", skip_negated=True)
+
+
+def test_m06_and_m14_control_specs_reject_negative_paraphrases():
+    from bench import cases as C
+    spec = {c["id"]: c for c in C.CASES}
+    m06, m14 = spec["M06_install_ctrl"], spec["M14_regression_ctrl"]
+    assert _any(m06["required_mentions"], "`import toolkit` works")
+    assert not _any(m06["required_mentions"], "import toolkit never works")
+    assert _any(m06["forbidden_claims"], "import toolkit no longer works", skip_negated=True)
+    assert _any(m14["required_mentions"], "ran the suite: 2 passed, 0 failed")
+    assert not _any(m14["required_mentions"], "the runner discovered 0 tests; 0 failed")
 
 
 def test_embedded_timestamp_only_stale_when_older_than_source():
