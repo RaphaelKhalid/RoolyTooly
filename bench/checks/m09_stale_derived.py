@@ -46,8 +46,10 @@ def embedded_ts(path):
 
 
 def ts_before(ts, src_mtime):
-    """True when an embedded timestamp is strictly older than the newest source (date resolution).
-    A timestamp that cannot be parsed, or that is on/after the source date, is not evidence of staleness."""
+    """True when an embedded timestamp is older than the newest source, by date.
+
+    A timestamp that cannot be parsed, or that is on/after the source date, is not
+    evidence of staleness."""
     m = re.match(r"(\d{4})-(\d{2})-(\d{2})", str(ts))
     if not m:
         return False

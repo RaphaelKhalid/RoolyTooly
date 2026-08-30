@@ -86,15 +86,27 @@ def _reads_path(run: dict, path: str) -> bool:
 
 
 _NEGATION = re.compile(r"(?i)\b(no|zero|0|without|not a single|free of)\s+(\w+\s+){0,2}$")
+# a negation only scopes over the same clause: punctuation or a conjunction ends it
+_CLAUSE_BREAK = re.compile(r"(?i)[;,.:]|\b(but|and|yet|however|although|while|except)\b")
+
+
+def _negated(prefix: str) -> bool:
+    """True when the clause ending at `prefix` denies what follows ("no violations")."""
+    clause = _CLAUSE_BREAK.split(prefix)[-1]
+    return bool(_NEGATION.search(clause))
 
 
 def _any(patterns: list[str], text: str, *, skip_negated: bool = False) -> list[str]:
-    """Patterns that match `text`. With skip_negated, a match whose 30 preceding characters end in a
-    negation ("no violations", "0 failed", "without errors") does not count - it denies the problem."""
+    """Patterns that match the text, optionally ignoring negated matches.
+
+    With skip_negated, a match whose own clause starts with a negation ("no violations",
+    "0 failed", "without errors") does not count, because it denies the problem rather
+    than asserting it. A conjunction or punctuation ends the negation's scope, so
+    "no errors but a regression remains" still counts as asserting a regression."""
     hits = []
     for p in patterns:
         for m in re.finditer(p, text):
-            if skip_negated and _NEGATION.search(text[max(0, m.start() - 30):m.start()]):
+            if skip_negated and _negated(text[max(0, m.start() - 40):m.start()]):
                 continue
             hits.append(p)
             break
