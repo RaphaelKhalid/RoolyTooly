@@ -774,5 +774,7 @@ footer { margin-top: 8px; padding-top: 16px; border-top: 1px solid var(--line); 
   .bubble, .tool-chip, .tool-chip-detail { overflow-wrap: anywhere; word-break: break-word; }
 }
 
-button.tool-chip-summary { font: inherit; text-align: left; cursor: pointer; }
+/* the summary is a <button>, which sizes to its content unless told otherwise: clamp it to the chip */
+button.tool-chip-summary { font: inherit; text-align: left; cursor: pointer; width: 100%; max-width: 100%; }
+.tool-chips, .tool-chip { min-width: 0; max-width: 100%; overflow: hidden; }
 button.tool-chip-summary:focus-visible { outline: 2px solid var(--fuchsia); outline-offset: 2px; }
