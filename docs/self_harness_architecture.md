@@ -97,3 +97,59 @@ both are visible; HumanEval+ is saturated for luna-high and is kept as an honest
 The harness did not change what the model can solve; it removed the case where the model claimed
 "ready" while the hidden tests failed, at +3% tokens. That is the intended effect: pass@1 is the
 model's number, false-completion rate is the harness's.
+
+## Review findings as a mistake source (2026-08-30)
+
+The Bright Data channel (Workflow C) mines *other people's* agent mistakes off the web. This channel
+mines *ours*: every finding the Qodo PR reviewer raised on `RaphaelKhalid/RoolyTooly` is a real bug
+this project shipped into a pull request, and it arrives with the two things `record_observation`
+already demands - a permanent `html_url` and a verbatim quote.
+
+`harness/qodo_findings.py` fetches the review comments with `gh api --paginate`
+(`repos/<repo>/pulls/comments` plus `repos/<repo>/issues/comments`, authors matching `/qodo/i`),
+parses each finding's title/body/path/line/PR, classifies it into a mistake family, and writes it
+through `mcp_servers/ledger_server.py:record_observation` with `import_key="qodo:<comment_id>"`.
+Re-running imports nothing (verified: a second run reported
+`Imported 0 observation(s); skipped 114 duplicate(s)`). The MCP tools `import_qodo_findings` and
+`qodo_rule_proposals` expose it to the TrueForge agent as Workflow H.
+
+### Real import, 2026-08-30
+
+`python harness/qodo_findings.py --propose` over PRs #1-#14: **114 findings imported**.
+
+| family | n | meaning |
+| --- | --- | --- |
+| M23 | 60 | Representation and deliverable mismatch |
+| `NEW:qodo-unclassified` | 23 | no keyword matched |
+| M14 | 8 | Fix introduces a regression |
+| M05 | 7 | Silent-null success |
+| M07 | 4 | Evidence destroyed before evaluation |
+| M09 | 4 | Stale-state insistence |
+| M11 | 4 | Semantic misdiagnosis |
+| M13 | 2 | Mixed metrics and moving denominators |
+| M03 | 1 | Proxy victory mistaken for target success |
+| M21 | 1 | Promise dropped after interruption |
+
+Eight candidate rules (families with >=2 findings) were written to
+`results/qodo_rule_proposals.json`, each carrying the URLs of the review comments that support it.
+
+### What this is not
+
+Read the numbers narrowly:
+
+- **These are review findings about harness code, not corrections of a running worker agent.** A
+  Qodo finding says a bug existed in a diff; it does not say an agent claimed success falsely. The
+  two are related but they are not the same evidence.
+- **The family labels are keyword heuristics**, not judgements. The classifier is an ordered
+  keyword-to-family table in `qodo_findings.py`; nothing read these findings and understood them.
+- **M23's 60 is inflated by one review category.** Most of that bucket is Qodo's docstring rule
+  violations ("summary exceeds limit", "summary lacks clarity"). Filing a docstring that misstates
+  what a unit does under "representation and deliverable mismatch" is defensible, but it is a
+  judgement call baked into a keyword list, and it makes M23 look far more dominant than the
+  correctness bugs do.
+- **23 findings matched nothing** and are stored as `NEW:qodo-unclassified` rather than being forced
+  into a family the classifier does not believe.
+- **Nothing here is promoted.** The proposals are candidates. A review finding is evidence that a
+  bug existed, not evidence that a rule prevents it - only a regression artifact and a benchmark
+  comparison are that. Every candidate still goes through compile -> falsify -> regression ->
+  benchmark -> human approval, the same gate as every other lesson.
