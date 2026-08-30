@@ -22,13 +22,12 @@ export default async function handler(req: any, res: any) {
   }
 
   // Derive the TrueForge path from the request URL itself: /api/tf/<path>?<qs>
+  // vercel.json rewrites /api/tf/<path> -> /api/tf?path=<path>; fall back to the URL path itself
   const reqUrl = new URL(req.url ?? "/", "http://local");
-  let tail = reqUrl.pathname.replace(/^\/api\/tf\/?/, "");
-  if (!tail) {
-    const rawPath = req.query?.path;
-    const segments: string[] = Array.isArray(rawPath) ? rawPath : rawPath ? [String(rawPath)] : [];
-    tail = segments.join("/");
-  }
+  const rawPath = req.query?.path ?? reqUrl.searchParams.get("path");
+  let tail = Array.isArray(rawPath) ? rawPath.join("/") : rawPath ? String(rawPath) : "";
+  if (!tail) tail = reqUrl.pathname.replace(/^\/api\/tf\/?/, "");
+  tail = tail.replace(/^\/+/, "");
   reqUrl.searchParams.delete("path");
   const qs = reqUrl.searchParams.toString();
   const base = TRUEFORGE_URL.replace(/\/+$/, "");

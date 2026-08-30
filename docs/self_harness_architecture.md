@@ -83,3 +83,84 @@ both are visible; HumanEval+ is saturated for luna-high and is kept as an honest
   as reassurance ("READY to publish"). Fix: a check that does not apply prints `CHECK N/A`, and checks
   are injected per task through Qodo retrieval, not globally. The keep/revert gate catching this is the
   system working as designed.
+
+## Local retrieval: three channels, RRF fusion, a dense channel that may fail
+
+`harness/rule_index.py` is the fast local path the harness consults per task. Qodo rule search
+stays the *selector* (`results/lesson_index.json` → `index`); the local retriever runs on the same
+query and is recorded next to it (`receipts[case]["local"]`) so the two can be compared offline.
+
+**Channels.** Three rankings are produced independently, each truncated to the first 50 results:
+
+| channel | signal | absolute gate |
+| --- | --- | --- |
+| `bm25` | Okapi BM25 over family + invariant + rule + preflight text | `>= 2.0` |
+| `char_ngram` | character 3-gram cosine (wording/morphology robust) | `>= 0.18` |
+| `dense` | OpenAI `text-embedding-3-small` cosine | `>= 0.42` |
+
+**Fusion.** Reciprocal-rank fusion at a constant `k = 60`, one-based ranks:
+
+    RRF(d) = Σ_{c ∈ {bm25, char_ngram, dense}} 1[d ∈ c] / (60 + rank_c(d))
+
+Raw BM25 / n-gram / cosine values never enter the sum — they are kept for receipts only. A
+lesson is then reinforced once by its family (`+0.25 ×` the best fused score in its family), and
+the hop never resurrects a lesson that scored zero on its own.
+
+**The gate is a disjunction.** A lesson is eligible if *any* channel shows real evidence
+(BM25 ≥ 2.0 **or** 3-gram ≥ 0.18 **or**, when dense is available, cosine ≥ 0.42). This deliberately
+differs from the original plan's conjunctive final gate: a merely mediocre cosine must not be able
+to delete a lesson the lexical channels already justified, and an uncalibrated 0.42 applied as an
+`AND` would silently shrink the lesson set. The receipt's `gate` field records `passed` when dense
+was evaluated and `not_evaluated` when it was not, so the two regimes are never confused.
+
+**Only the explicit API opts in.** `retrieve_lessons()` / `LessonIndex.retrieve()` are the
+three-channel entry points and run dense by default; the older `LessonIndex.score()` and
+`.select()` wrappers are **local-only unless `dense=True`**, so a caller that predates the dense
+channel can never be made to open a connection by the mere presence of a key. `harness/rule_index.py`
+`bench()` and `harness/qodo_lessons.select()` both call `retrieve()`, so the harness path still opts in.
+
+**Vectors are validated before they are trusted.** Every embedding — freshly fetched or read back
+from cache — must be a non-empty list of finite reals, and every vector in a set must share one
+dimension. A `NaN`, an `inf`, or a ragged dimension degrades the whole query to `dense_status =
+"error"` and lexical-only retrieval; it must never become a silent `0.0` cosine that looks like a
+healthy "not relevant" verdict. A batch that fails validation is not written to the cache, so the
+next call retries cleanly, and a corrupt cache entry is treated as absent rather than used.
+
+**Cache and credentials.** `OPENAI_API_KEY` is read from the environment first, then from the
+gitignored `.env` at the repo root. Vectors are cached at `results/embeddings/<sha256(text)>.json`
+holding only `{model, sha256, dimensions, vector}` — never the source text, never the key — and are
+written through a temp file plus `os.replace`, so a reader never sees a half-written entry. Entries
+whose model or digest does not match are rejected and re-fetched. An in-process vector cache makes
+a warm same-process retrieval do no disk or network work.
+
+**Degradation.** The single HTTP call is `POST https://api.openai.com/v1/embeddings` through
+`urllib.request` with a 5 s timeout — stdlib only, no SDK. If the key is missing, `dense_status`
+becomes `missing_key`; if the request, the JSON, or the response shape fails, it becomes `error`.
+In both cases the dense channel is dropped from the fusion and retrieval continues on BM25 +
+char-n-gram. An embedding failure must never present as "no lessons apply": only an actually empty
+lexical index may produce an empty selection.
+
+**Receipt schema** (per selected lesson, in `results/lesson_index.json`):
+
+```
+{"lesson_id", "channels_fired": ⊆ {bm25, char_ngram, dense, qodo},
+ "channels": {<channel>: {"rank", "score"}}, "rrf_score", "score",
+ "cosine", "gate": "passed"|"not_evaluated", "qodo_rank": int|null}
+```
+
+`cosine` is recorded **unrounded**: the receipt has to quote the value the gate actually compared,
+or a threshold could never be recalibrated from receipts (a cosine of 0.41996 rounds to 0.42 and
+would contradict its own `blocked` verdict).
+
+with `dense_status`, `dense_error`, `cosine_threshold`, `rrf_k` and `channel_depth` recorded per
+case, and `retrieval` / `qodo_agreement` blocks at the top level. Qodo is reconciled by canonical
+lesson id (never by display title) and reported as provenance and diagnostics — it is not a fourth
+RRF channel, and disagreement is measured, never required. `mcp_servers/eval_server.py` exposes the
+same configuration through `retrieval_provenance()`; it is kept out of `harness_manifest()`'s return
+value on purpose, because that dict is posted verbatim to TrueForge as a session spec.
+
+**Calibration.** `0.42 / k=60 / depth=50` are the starting constants, not measured optima. The
+inputs for calibration are the `results/retrieval_bench_*.json` artifacts written by
+`python -m harness.rule_index bench`, which now record the full per-hit receipt and the dense
+status for every query. Change them only with a benchmark that shows Recall@K held, MRR held or
+improved, and false positives down.
