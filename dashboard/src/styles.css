@@ -760,17 +760,10 @@ footer { margin-top: 8px; padding-top: 16px; border-top: 1px solid var(--line); 
   .password-card-row input,
   .password-card-row button { min-height: 44px; width: 100%; }
 
-  .composer-presets { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
-  .preset-chip {
-    max-width: none;
-    width: 100%;
-    min-height: 44px;
-    white-space: normal;
-    overflow: visible;
-    text-overflow: clip;
-    line-height: 1.3;
-  }
-  .preset-chip:last-child { grid-column: 1 / -1; }
+  /* one scrollable row: every preset on the same line, swipe sideways for the rest */
+  .composer-presets { display: flex; flex-wrap: nowrap; gap: 8px; overflow-x: auto; -webkit-overflow-scrolling: touch; scrollbar-width: none; padding-bottom: 2px; }
+  .composer-presets::-webkit-scrollbar { display: none; }
+  .preset-chip { flex: 0 0 auto; max-width: none; min-height: 44px; white-space: nowrap; line-height: 1.3; }
 
   .composer-textarea, .send-btn { min-height: 44px; }
 
