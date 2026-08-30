@@ -1,4 +1,23 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
+
+// Mirrors the `@media (min-width: 1100px)` breakpoint in styles.css where the
+// rail switches from an off-canvas drawer to an always-visible sticky column.
+// Needed so aria-hidden/inert reflect what's actually on screen instead of
+// just the drawer's open/closed state (Qodo: "visible rail hidden
+// semantically" — a desktop-visible rail was aria-hidden because `open`
+// defaults to false, even though the CSS ignores `open` at that width).
+function useIsDesktopRail(): boolean {
+  const query = "(min-width: 1100px)";
+  const [isDesktop, setIsDesktop] = useState(() => (typeof window !== "undefined" ? window.matchMedia(query).matches : false));
+  useEffect(() => {
+    const mql = window.matchMedia(query);
+    const onChange = () => setIsDesktop(mql.matches);
+    onChange();
+    mql.addEventListener("change", onChange);
+    return () => mql.removeEventListener("change", onChange);
+  }, []);
+  return isDesktop;
+}
 
 type Metric = { value?: unknown; artifact?: string | null };
 
@@ -63,6 +82,11 @@ function QodoRulesRail({
   const rules = data?.rules ?? [];
   const catalogTotal = data?.workspace_catalog?.total?.value;
   const retrieved = data?.retrieved_for_task;
+  const isDesktop = useIsDesktopRail();
+  // Off-canvas only below the rail breakpoint, and only while closed — this
+  // is the "is it actually hidden from the page right now" flag, not a raw
+  // mirror of `open` (see useIsDesktopRail above).
+  const offCanvas = !isDesktop && !open;
 
   useEffect(() => {
     if (!open) return;
@@ -79,11 +103,25 @@ function QodoRulesRail({
       <aside
         className={`qodo-rail${open ? " open" : ""}`}
         aria-label="Qodo rules compiled from agent mistakes"
-        aria-hidden={!open ? "true" : undefined}
+        aria-hidden={offCanvas ? "true" : undefined}
+        // Off-canvas content stays in the DOM (for the slide-in transition)
+        // but must drop out of the tab order — otherwise a keyboard user can
+        // tab into the close button and rule cards while they're slid off
+        // the right edge of the screen (Qodo: "closed drawer remains
+        // focusable"). `inert` is the one attribute that covers every
+        // focusable descendant at once, present or future.
+        // @ts-expect-error -- `inert` is a valid boolean HTML attribute; add if the installed React type defs don't declare it yet.
+        inert={offCanvas ? "" : undefined}
       >
         <div className="qodo-rail-topbar">
           <span className="qodo-rail-topbar-label">Rules</span>
-          <button type="button" className="qodo-rail-close" onClick={onClose} aria-label="Close rules panel">
+          <button
+            type="button"
+            className="qodo-rail-close"
+            onClick={onClose}
+            aria-label="Close rules panel"
+            tabIndex={offCanvas ? -1 : 0}
+          >
             close
           </button>
         </div>

@@ -416,6 +416,89 @@ def build_benchmark_pair(prefix: str, warnings: list[str]) -> dict[str, Any]:
     return out
 
 
+def build_retrieval(warnings: list[str]) -> dict[str, Any]:
+    """Return the local-vs-Qodo rule retrieval speed comparison from the newest warm run.
+
+    results/retrieval_bench_*.json holds one benchmark per file: n queries compared,
+    local hybrid (BM25 + char n-gram + embeddings) vs Qodo rule search median latency,
+    and their top-3 agreement rate. Older files predate the embedding stage and lack
+    dense_status_counts; only a file with at least one successful dense lookup (ok > 0)
+    counts as the "warm" run the headline numbers come from. cold_ms_median, when
+    present, is the local median from the next-older dense-capable file — the closest
+    thing on disk to a first, unwarmed call."""
+    empty = {
+        "artifact": None,
+        "local_ms_median": None,
+        "qodo_ms_median": None,
+        "speedup": None,
+        "agreement_rate": None,
+        "overlap_rate": None,
+        "compared": None,
+        "n": None,
+        "lessons_indexed": None,
+        "embedding_model": None,
+    }
+    dense_runs: list[tuple[Path, dict[str, Any]]] = []
+    for path in sorted(ROOT.glob("results/retrieval_bench_*.json")):
+        obj, error = read_json(path)
+        if error:
+            warnings.append(error)
+            continue
+        if not isinstance(obj, dict):
+            warnings.append(f"{path.name}: not an object")
+            continue
+        if isinstance(obj.get("dense_status_counts"), dict):
+            dense_runs.append((path, obj))
+
+    warm_index: int | None = None
+    for i, (_, obj) in enumerate(dense_runs):
+        counts = obj.get("dense_status_counts") or {}
+        ok = counts.get("ok")
+        if isinstance(ok, (int, float)) and ok > 0:
+            warm_index = i  # keep overwriting so the last (newest) match wins
+    if warm_index is None:
+        return empty
+
+    path, obj = dense_runs[warm_index]
+    local_ms = obj.get("local_ms_median")
+    qodo_ms = obj.get("qodo_ms_median")
+    speedup = round(qodo_ms / local_ms, 2) if isinstance(local_ms, (int, float)) and local_ms and isinstance(qodo_ms, (int, float)) else None
+
+    # agreement_rate (from the file) is exact top-k SET equality, which is
+    # harsh when Qodo returns fewer rules than our top_k — overlap_rate is
+    # the gentler, more honest number: the share of compared rows where the
+    # two result sets share at least one rule.
+    overlap = 0
+    compared = 0
+    for row in obj.get("rows") or []:
+        if not isinstance(row, dict) or row.get("status") != "ok":
+            continue
+        local_ids = row.get("local") if isinstance(row.get("local"), list) else []
+        qodo_ids = row.get("qodo") if isinstance(row.get("qodo"), list) else []
+        compared += 1
+        if set(local_ids) & set(qodo_ids):
+            overlap += 1
+    overlap_rate = round(overlap / compared, 3) if compared else None
+
+    out: dict[str, Any] = {
+        "artifact": artifact_name(path),
+        "local_ms_median": local_ms,
+        "qodo_ms_median": qodo_ms,
+        "speedup": speedup,
+        "agreement_rate": obj.get("agreement_rate"),
+        "overlap_rate": overlap_rate,
+        "compared": compared or None,
+        "n": obj.get("n"),
+        "lessons_indexed": obj.get("lessons_indexed"),
+        "embedding_model": obj.get("embedding_model"),
+    }
+    if warm_index > 0:
+        cold_ms = dense_runs[warm_index - 1][1].get("local_ms_median")
+        if cold_ms is not None:
+            out["cold_ms_median"] = cold_ms
+    return out
+
+
 def build_timeline(warnings: list[str]) -> list[dict[str, Any]]:
     """Return one benchmark-run summary per saved timeline snapshot, for trend charts.
 
@@ -497,6 +580,7 @@ def main() -> None:
         "spend": build_spend(),
         "humaneval": build_benchmark_pair("humaneval_plus", warnings),
         "livecodebench": build_benchmark_pair("livecodebench", warnings),
+        "retrieval": build_retrieval(warnings),
         "timeline": build_timeline(warnings),
         "warnings": warnings,
     }
