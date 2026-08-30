@@ -26,6 +26,12 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 ROOT = Path(__file__).resolve().parents[1]
+# Running this file directly (the documented launch) puts mcp_servers/, not the repository root,
+# at the head of sys.path, so `from harness import ...` inside a tool would raise
+# ModuleNotFoundError. Put the root on the path before any tool needs a sibling package.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 LEDGER_DIR = Path(os.environ.get("ROOLY_LEDGER_DIR", ROOT / "ledger"))
 LEDGER_DIR.mkdir(parents=True, exist_ok=True)
 LOG = LEDGER_DIR / "ledger.jsonl"
@@ -318,12 +324,16 @@ def get_active_lessons() -> dict:
 
 @mcp.tool(annotations=APPEND)
 def record_observation(source_url: str, quote: str, family: str, surface: str, causal_trap: str,
-                       proposed_case: str = "", confidence: float = 0.5) -> dict:
+                       proposed_case: str = "", confidence: float = 0.5,
+                       import_key: str = "") -> dict:
     """Record one real-world agent mistake found on the web.
 
     quote = verbatim excerpt (<=400 chars) from the scraped page; source_url = the http(s) page it
     came from; family = Mxx or 'NEW:<name>'; surface = domain/wording; causal_trap = generalized
-    structure; proposed_case = one-line seeded-task idea with a deterministic check."""
+    structure; proposed_case = one-line seeded-task idea with a deterministic check.
+    import_key = optional de-duplication key for automated importers (e.g. 'qodo:<comment_id>');
+    the importer is responsible for checking it before calling, the same way
+    harness/import_history.py does."""
     fam_ok = family in FAMILIES or family.startswith("NEW:")
     if not fam_ok:
         return {"error": f"family must be one of {sorted(FAMILIES)} or 'NEW:<name>'"}
@@ -331,9 +341,12 @@ def record_observation(source_url: str, quote: str, family: str, surface: str, c
         return {"error": "source_url must be an http(s) URL that was actually scraped"}
     if len(quote.strip()) < 20:
         return {"error": "quote must be a verbatim excerpt of at least 20 characters"}
-    rec = _append("observation", {"source_url": source_url, "quote": quote[:400], "family": family,
-                                  "surface": surface[:200], "causal_trap": causal_trap[:400],
-                                  "proposed_case": proposed_case[:400], "confidence": float(confidence)})
+    payload = {"source_url": source_url, "quote": quote[:400], "family": family,
+               "surface": surface[:200], "causal_trap": causal_trap[:400],
+               "proposed_case": proposed_case[:400], "confidence": float(confidence)}
+    if import_key:
+        payload["import_key"] = str(import_key)[:200]
+    rec = _append("observation", payload)
     return {"observation_id": rec["id"]}
 
 
@@ -359,6 +372,35 @@ def observation_stats() -> dict:
             "proposed_cases": [{"family": o["family"], "case": o["proposed_case"], "source": o["source_url"]}
                                for o in obs if o.get("proposed_case")][-20:],
             "recent": [{"family": o["family"], "quote": o["quote"][:160], "source": o["source_url"]} for o in obs[-10:]]}
+
+
+@mcp.tool(annotations=APPEND)
+def import_qodo_findings(dry_run: bool = False) -> dict:
+    """Import the bugs Qodo's PR reviewer caught on this repository as observations.
+
+    Same channel as the Bright Data mistake-miner, but sourced from our own PR reviews: fetches
+    Qodo's review comments with `gh api`, classifies each finding into a mistake family by
+    keyword, and records it here with import_key='qodo:<comment_id>' so re-runs are idempotent.
+    dry_run=True classifies and counts without writing. Returns per-family counts."""
+    from harness import qodo_findings  # late import: the CLI module owns the gh/parse logic
+    try:
+        comments = qodo_findings.fetch_comments()
+    except (RuntimeError, OSError) as exc:
+        return {"error": f"could not fetch Qodo comments: {exc}"}
+    findings = qodo_findings.findings_from_comments(comments)
+    return qodo_findings.import_findings(findings, dry_run=bool(dry_run))
+
+
+@mcp.tool(annotations=READ)
+def qodo_rule_proposals() -> dict:
+    """Group the imported Qodo review findings into candidate rules.
+
+    Recomputed from the observations currently in THIS ledger on every call (>=2 findings per
+    family), never from a previously written file, so the result cannot be stale or empty after
+    a fresh import. Nothing here is promoted - each candidate still goes through
+    compile -> falsify -> regression -> benchmark -> approval."""
+    from harness import qodo_findings
+    return qodo_findings.proposals_from_ledger(ls=sys.modules[__name__])
 
 
 @mcp.tool(annotations=READ)

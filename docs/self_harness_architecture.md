@@ -92,75 +92,62 @@ query and is recorded next to it (`receipts[case]["local"]`) so the two can be c
 
 **Channels.** Three rankings are produced independently, each truncated to the first 50 results:
 
-| channel | signal | absolute gate |
+The harness did not change what the model can solve; it removed the case where the model claimed
+"ready" while the hidden tests failed, at +3% tokens. That is the intended effect: pass@1 is the
+model's number, false-completion rate is the harness's.
+
+## Review findings as a mistake source (2026-08-30)
+
+The Bright Data channel (Workflow C) mines *other people's* agent mistakes off the web. This channel
+mines *ours*: every finding the Qodo PR reviewer raised on `RaphaelKhalid/RoolyTooly` is a real bug
+this project shipped into a pull request, and it arrives with the two things `record_observation`
+already demands - a permanent `html_url` and a verbatim quote.
+
+`harness/qodo_findings.py` fetches the review comments with `gh api --paginate`
+(`repos/<repo>/pulls/comments` plus `repos/<repo>/issues/comments`, authors matching `/qodo/i`),
+parses each finding's title/body/path/line/PR, classifies it into a mistake family, and writes it
+through `mcp_servers/ledger_server.py:record_observation` with `import_key="qodo:<comment_id>"`.
+Re-running imports nothing (verified: a second run reported
+`Imported 0 observation(s); skipped 114 duplicate(s)`). The MCP tools `import_qodo_findings` and
+`qodo_rule_proposals` expose it to the TrueForge agent as Workflow H.
+
+### Real import, 2026-08-30
+
+`python harness/qodo_findings.py --propose` over PRs #1-#14: **114 findings imported**.
+
+| family | n | meaning |
 | --- | --- | --- |
-| `bm25` | Okapi BM25 over family + invariant + rule + preflight text | `>= 2.0` |
-| `char_ngram` | character 3-gram cosine (wording/morphology robust) | `>= 0.18` |
-| `dense` | OpenAI `text-embedding-3-small` cosine | `>= 0.42` |
+| M23 | 60 | Representation and deliverable mismatch |
+| `NEW:qodo-unclassified` | 23 | no keyword matched |
+| M14 | 8 | Fix introduces a regression |
+| M05 | 7 | Silent-null success |
+| M07 | 4 | Evidence destroyed before evaluation |
+| M09 | 4 | Stale-state insistence |
+| M11 | 4 | Semantic misdiagnosis |
+| M13 | 2 | Mixed metrics and moving denominators |
+| M03 | 1 | Proxy victory mistaken for target success |
+| M21 | 1 | Promise dropped after interruption |
 
-**Fusion.** Reciprocal-rank fusion at a constant `k = 60`, one-based ranks:
+Eight candidate rules (families with >=2 findings) were written to
+`results/qodo_rule_proposals.json`, each carrying the URLs of the review comments that support it.
 
-    RRF(d) = Σ_{c ∈ {bm25, char_ngram, dense}} 1[d ∈ c] / (60 + rank_c(d))
+### What this is not
 
-Raw BM25 / n-gram / cosine values never enter the sum — they are kept for receipts only. A
-lesson is then reinforced once by its family (`+0.25 ×` the best fused score in its family), and
-the hop never resurrects a lesson that scored zero on its own.
+Read the numbers narrowly:
 
-**The gate is a disjunction.** A lesson is eligible if *any* channel shows real evidence
-(BM25 ≥ 2.0 **or** 3-gram ≥ 0.18 **or**, when dense is available, cosine ≥ 0.42). This deliberately
-differs from the original plan's conjunctive final gate: a merely mediocre cosine must not be able
-to delete a lesson the lexical channels already justified, and an uncalibrated 0.42 applied as an
-`AND` would silently shrink the lesson set. The receipt's `gate` field records `passed` when dense
-was evaluated and `not_evaluated` when it was not, so the two regimes are never confused.
-
-**Only the explicit API opts in.** `retrieve_lessons()` / `LessonIndex.retrieve()` are the
-three-channel entry points and run dense by default; the older `LessonIndex.score()` and
-`.select()` wrappers are **local-only unless `dense=True`**, so a caller that predates the dense
-channel can never be made to open a connection by the mere presence of a key. `harness/rule_index.py`
-`bench()` and `harness/qodo_lessons.select()` both call `retrieve()`, so the harness path still opts in.
-
-**Vectors are validated before they are trusted.** Every embedding — freshly fetched or read back
-from cache — must be a non-empty list of finite reals, and every vector in a set must share one
-dimension. A `NaN`, an `inf`, or a ragged dimension degrades the whole query to `dense_status =
-"error"` and lexical-only retrieval; it must never become a silent `0.0` cosine that looks like a
-healthy "not relevant" verdict. A batch that fails validation is not written to the cache, so the
-next call retries cleanly, and a corrupt cache entry is treated as absent rather than used.
-
-**Cache and credentials.** `OPENAI_API_KEY` is read from the environment first, then from the
-gitignored `.env` at the repo root. Vectors are cached at `results/embeddings/<sha256(text)>.json`
-holding only `{model, sha256, dimensions, vector}` — never the source text, never the key — and are
-written through a temp file plus `os.replace`, so a reader never sees a half-written entry. Entries
-whose model or digest does not match are rejected and re-fetched. An in-process vector cache makes
-a warm same-process retrieval do no disk or network work.
-
-**Degradation.** The single HTTP call is `POST https://api.openai.com/v1/embeddings` through
-`urllib.request` with a 5 s timeout — stdlib only, no SDK. If the key is missing, `dense_status`
-becomes `missing_key`; if the request, the JSON, or the response shape fails, it becomes `error`.
-In both cases the dense channel is dropped from the fusion and retrieval continues on BM25 +
-char-n-gram. An embedding failure must never present as "no lessons apply": only an actually empty
-lexical index may produce an empty selection.
-
-**Receipt schema** (per selected lesson, in `results/lesson_index.json`):
-
-```
-{"lesson_id", "channels_fired": ⊆ {bm25, char_ngram, dense, qodo},
- "channels": {<channel>: {"rank", "score"}}, "rrf_score", "score",
- "cosine", "gate": "passed"|"not_evaluated", "qodo_rank": int|null}
-```
-
-`cosine` is recorded **unrounded**: the receipt has to quote the value the gate actually compared,
-or a threshold could never be recalibrated from receipts (a cosine of 0.41996 rounds to 0.42 and
-would contradict its own `blocked` verdict).
-
-with `dense_status`, `dense_error`, `cosine_threshold`, `rrf_k` and `channel_depth` recorded per
-case, and `retrieval` / `qodo_agreement` blocks at the top level. Qodo is reconciled by canonical
-lesson id (never by display title) and reported as provenance and diagnostics — it is not a fourth
-RRF channel, and disagreement is measured, never required. `mcp_servers/eval_server.py` exposes the
-same configuration through `retrieval_provenance()`; it is kept out of `harness_manifest()`'s return
-value on purpose, because that dict is posted verbatim to TrueForge as a session spec.
-
-**Calibration.** `0.42 / k=60 / depth=50` are the starting constants, not measured optima. The
-inputs for calibration are the `results/retrieval_bench_*.json` artifacts written by
-`python -m harness.rule_index bench`, which now record the full per-hit receipt and the dense
-status for every query. Change them only with a benchmark that shows Recall@K held, MRR held or
-improved, and false positives down.
+- **These are review findings about harness code, not corrections of a running worker agent.** A
+  Qodo finding says a bug existed in a diff; it does not say an agent claimed success falsely. The
+  two are related but they are not the same evidence.
+- **The family labels are keyword heuristics**, not judgements. The classifier is an ordered
+  keyword-to-family table in `qodo_findings.py`; nothing read these findings and understood them.
+- **M23's 60 is inflated by one review category.** Most of that bucket is Qodo's docstring rule
+  violations ("summary exceeds limit", "summary lacks clarity"). Filing a docstring that misstates
+  what a unit does under "representation and deliverable mismatch" is defensible, but it is a
+  judgement call baked into a keyword list, and it makes M23 look far more dominant than the
+  correctness bugs do.
+- **23 findings matched nothing** and are stored as `NEW:qodo-unclassified` rather than being forced
+  into a family the classifier does not believe.
+- **Nothing here is promoted.** The proposals are candidates. A review finding is evidence that a
+  bug existed, not evidence that a rule prevents it - only a regression artifact and a benchmark
+  comparison are that. Every candidate still goes through compile -> falsify -> regression ->
+  benchmark -> human approval, the same gate as every other lesson.

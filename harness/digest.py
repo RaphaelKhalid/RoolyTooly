@@ -16,12 +16,23 @@ from __future__ import annotations
 import argparse
 import calendar
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LEDGER = ROOT / "ledger" / "ledger.jsonl"
+
+
+def _ledger_path() -> Path:
+    """Resolve the ledger file the same way the ledger server does.
+
+    ROOLY_LEDGER_DIR redirects both, so the digest always reports on the ledger the imports
+    actually wrote to. Read at call time, not at import, so a redirected run is picked up.
+    """
+    return Path(os.environ.get("ROOLY_LEDGER_DIR", ROOT / "ledger")) / "ledger.jsonl"
+
+
 RESULTS = ROOT / "results"
 DIGEST_DIR = ROOT / "docs" / "digest"
 
@@ -62,10 +73,11 @@ def _default_since() -> str:
 
 
 def _read_ledger() -> list[dict]:
-    if not LEDGER.exists():
+    ledger = _ledger_path()
+    if not ledger.exists():
         return []
     out = []
-    for line in LEDGER.read_text(encoding="utf-8").splitlines():
+    for line in ledger.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -234,6 +246,53 @@ def _open_problems() -> list[str]:
     return [f"- {parts} (from `{latest.name}`)."]
 
 
+def _bugs_caught_in_review() -> list[str]:
+    """Summarise the bugs the code reviewer caught in our own pull requests.
+
+    Reads only files on disk: the observations already in the ledger (import_key 'qodo:*',
+    resolved through _ledger_path so ROOLY_LEDGER_DIR is honoured) and, for the candidate rules,
+    results/qodo_rule_proposals.json. Says "no data" rather than guessing when either is absent.
+    """
+    records = _read_ledger()
+    qodo_obs = [r for r in records
+                if r.get("kind") == "observation" and str(r.get("import_key", "")).startswith("qodo:")]
+    if not qodo_obs:
+        return ["No data (no Qodo review findings imported yet; run "
+                "`python -m harness.qodo_findings --propose`)."]
+
+    per_family: dict[str, int] = {}
+    for r in qodo_obs:
+        fam = str(r.get("family", "?"))
+        per_family[fam] = per_family.get(fam, 0) + 1
+    ranked = sorted(per_family.items(), key=lambda kv: (-kv[1], kv[0]))
+    families = "; ".join(f"{_plain(f)}: {n}" for f, n in ranked)
+
+    lines = [f"- {len(qodo_obs)} finding(s) the code reviewer caught in our own pull requests, "
+             f"imported as observations (from `ledger/ledger.jsonl`).",
+             f"- Grouped by kind of mistake — {families}."]
+
+    prop_path = RESULTS / "qodo_rule_proposals.json"
+    if not prop_path.exists():
+        lines.append("- No candidate rules proposed yet (no `results/qodo_rule_proposals.json`).")
+        return lines
+    try:
+        doc = json.loads(prop_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        lines.append(f"- No data (`{prop_path.name}` could not be read).")
+        return lines
+    proposals = doc.get("proposals") or []
+    if not proposals:
+        lines.append(f"- No candidate rules yet: no kind of mistake reached the minimum of "
+                     f"{doc.get('min_findings_per_family', '?')} findings (`{prop_path.name}`).")
+        return lines
+    lines.append(f"- {len(proposals)} candidate rule(s) suggested, none of them live yet — each "
+                 f"still has to pass testing and your approval (`{prop_path.name}`):")
+    for p in proposals[:5]:
+        lines.append(f"    - {_plain(str(p.get('family', '?')))} "
+                     f"({p.get('n_findings', '?')} findings): {_quote(str(p.get('rule_text', '')), 150)}")
+    return lines
+
+
 def build(since: str) -> str:
     since_epoch = _to_epoch(since)
     records = _read_ledger()
@@ -248,6 +307,9 @@ def build(since: str) -> str:
     lines.append("")
     lines.append("## Rules added / merged / retired")
     lines += _rules_added_merged_retired(records, since_epoch, lessons)
+    lines.append("")
+    lines.append("## Bugs caught in review")
+    lines += _bugs_caught_in_review()
     lines.append("")
     lines.append("## Did it help?")
     lines += _did_it_help()
