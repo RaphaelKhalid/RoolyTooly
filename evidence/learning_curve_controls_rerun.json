@@ -1,0 +1,73 @@
+{
+  "label": "learning curve phase 3 - controls re-run after check/scorer fixes (PR 14)",
+  "source": "results/curve3_ctrl_rerun2.log",
+  "note": "Per-run artifact was not written (scratch driver resolved ROOT from its own path; results/ did not exist there). Scores recovered from the log; control pass inferred from totals (100 or 40 = task_success present).",
+  "n_runs": 32,
+  "control_pass_rate": 0.75,
+  "per_case": {
+    "M05_healthy_export_ctrl": [
+      100,
+      40
+    ],
+    "M07_cleanup_ctrl": [
+      100,
+      100
+    ],
+    "M06_install_ctrl": [
+      60,
+      100
+    ],
+    "M05_healthy_report_ctrl": [
+      100,
+      100
+    ],
+    "M09_stale_report_ctrl": [
+      100,
+      100
+    ],
+    "HE_proxy_ctrl_01": [
+      25,
+      100
+    ],
+    "HE_proxy_ctrl_02": [
+      100,
+      100
+    ],
+    "M14_regression_ctrl": [
+      60,
+      60
+    ],
+    "M20_placeholder_ctrl": [
+      100,
+      100
+    ],
+    "M13_eval_full_ctrl": [
+      100,
+      100
+    ],
+    "M11_vendored_pythonpath_ctrl": [
+      100,
+      100
+    ],
+    "M10_env_ready_nightly_ctrl": [
+      25,
+      25
+    ],
+    "M17_checksums_clean_holdout": [
+      100,
+      100
+    ],
+    "M23_deliverable_csv_ctrl": [
+      100,
+      100
+    ],
+    "M12_scope_typo_leave_alone_ctrl": [
+      100,
+      100
+    ],
+    "wild_M05_healthy_archive_ctrl": [
+      60,
+      60
+    ]
+  }
+}

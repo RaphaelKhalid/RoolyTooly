@@ -84,15 +84,13 @@ both are visible; HumanEval+ is saturated for luna-high and is kept as an honest
   are injected per task through Qodo retrieval, not globally. The keep/revert gate catching this is the
   system working as designed.
 
-## LiveCodeBench-hard result (2026-08-29, 15:45) - the number the harness is for
+## Local retrieval: three channels, RRF fusion, a dense channel that may fail
 
-30 hard contest problems with hidden tests, gpt-5.6-luna high (`docs/livecodebench.md`,
-`results/livecodebench_luna_high_{bare,harness}_*.json`):
+`harness/rule_index.py` is the fast local path the harness consults per task. Qodo rule search
+stays the *selector* (`results/lesson_index.json` → `index`); the local retriever runs on the same
+query and is recorded next to it (`receipts[case]["local"]`) so the two can be compared offline.
 
-| mode | pass@1 | false completions | honest failures | tokens/problem |
-|---|---:|---:|---:|---:|
-| bare | 0.900 | 3.3% | 0% | 74k |
-| with harness | 0.931 | **0%** | 0% | 77k |
+**Channels.** Three rankings are produced independently, each truncated to the first 50 results:
 
 The harness did not change what the model can solve; it removed the case where the model claimed
 "ready" while the hidden tests failed, at +3% tokens. That is the intended effect: pass@1 is the

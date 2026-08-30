@@ -241,29 +241,67 @@ def sync(lesson_ids: list[str] | None = None) -> None:
         print(f"created {L['id']} -> {rid} state={state}")
 
 
+def _rel(path: Path) -> str:
+    """Render a path relative to the repo root when it lives under it."""
+    try:
+        return str(path.relative_to(ROOT))
+    except ValueError:
+        return str(path)
+
+
 def _sha(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()[:16]
 
 
-def select(top_k: int = 5, lesson_ids: list[str] | None = None) -> None:
+def _reconcile(local_ids: list[str], qodo_ids: list[str]) -> dict:
+    """Compare the local selection with Qodo's by canonical lesson id, not title."""
+    both = [i for i in local_ids if i in qodo_ids]
+    return {"both": both, "local_only": [i for i in local_ids if i not in qodo_ids],
+            "qodo_only": [i for i in qodo_ids if i not in local_ids],
+            "same_set": set(local_ids) == set(qodo_ids)}
+
+
+def select(top_k: int = 5, lesson_ids: list[str] | None = None, *, embedder=None,
+           cosine_threshold: float | None = None, rrf_k: int | None = None) -> None:
     """Ask Qodo which lessons apply to each seeded case; write an index with receipts.
 
     Fail-safe: a search failure is recorded as `null` (unknown) for that case, so the eval-runner falls
     back to every active lesson instead of silently injecting nothing. Returned rules are candidates;
-    they are accepted only if they map to a currently ACTIVE lesson (deterministic filter)."""
+    they are accepted only if they map to a currently ACTIVE lesson (deterministic filter).
+
+    Qodo stays the selector: `index` is exactly what Qodo accepted. The local three-channel
+    retriever (harness.rule_index) is run for the same query and recorded under
+    `receipts[case]["local"]` with per-channel receipts, so the two can be compared offline
+    without changing what the eval-runner injects. Agreement is reported, never required."""
+    from harness import rule_index as R  # local import: rule_index imports this module at top level
+
+    embedder = R.embed_texts if embedder is None else embedder
+    cosine_threshold = R.DEFAULT_COSINE_THRESHOLD if cosine_threshold is None else cosine_threshold
+    rrf_k = R.DEFAULT_RRF_K if rrf_k is None else rrf_k
     lessons = {L["id"]: L for L in (all_lessons() if lesson_ids else active_lessons()) if not lesson_ids or L["id"] in lesson_ids}
+    local_index = R.LessonIndex(list(lessons.values()))
     mapping = {v: k for k, v in mapped_rule_ids().items()}  # rule_id -> lesson_id
     ledger_hash = _sha(LEDGER.read_text(encoding="utf-8")) if LEDGER.exists() else None
     index: dict[str, list[str] | None] = {}
     receipts: dict[str, dict] = {}
+    agreement = {"compared": 0, "same_set": 0, "any_overlap": 0, "qodo_unknown": 0}
+    dense_statuses: dict[str, int] = {}
     for c in C.CASES:
         ask = c["task"].split("Then: ")[-1][:300]
         query = f"Name: Pre-claim verification for this coding task\nCategory: Correctness\nContent: {ask}"
+        local = local_index.retrieve(ask, limit=top_k, cosine_threshold=cosine_threshold,
+                                     rrf_k=rrf_k, embedder=embedder)
+        local_receipt = local.receipt()
+        dense_statuses[local.dense_status] = dense_statuses.get(local.dense_status, 0) + 1
         res = _qodo("rules", "search", "--query", query, "--top-k", str(top_k), "--scopes", SCOPE)
         if not isinstance(res, dict) or "rules" not in res:
             index[c["id"]] = None  # unknown -> fallback to all active lessons at runtime
-            receipts[c["id"]] = {"query_hash": _sha(query), "status": "unknown", "reason": "qodo search failed or returned invalid JSON"}
-            print(f"{c['id']:<32} UNKNOWN (fallback)")
+            agreement["qodo_unknown"] += 1
+            local_receipt["agreement"] = None
+            receipts[c["id"]] = {"query_hash": _sha(query), "status": "unknown",
+                                 "reason": "qodo search failed or returned invalid JSON",
+                                 "local": local_receipt}
+            print(f"{c['id']:<32} UNKNOWN (fallback)  local={local.lesson_ids} dense={local.dense_status}")
             continue
         ranked, accepted, rejected = [], [], []
         for r in res["rules"]:
@@ -279,14 +317,33 @@ def select(top_k: int = 5, lesson_ids: list[str] | None = None) -> None:
                 rejected.append({"rule_id": rid, "lesson_id": lid, "reason": "lesson not active in ledger"})
             else:
                 accepted.append(lid)
+        qodo_rank = {lid: n for n, lid in enumerate(accepted, start=1)}
+        for h in local_receipt["hits"]:
+            rank = qodo_rank.get(h["lesson_id"])
+            h["qodo_rank"] = rank
+            if rank is not None:
+                h["channels_fired"] = h["channels_fired"] + ["qodo"]
+        local_receipt["agreement"] = _reconcile(local.lesson_ids, accepted)
+        agreement["compared"] += 1
+        agreement["same_set"] += bool(local_receipt["agreement"]["same_set"])
+        agreement["any_overlap"] += bool(local_receipt["agreement"]["both"])
         index[c["id"]] = accepted
-        receipts[c["id"]] = {"query_hash": _sha(query), "status": "ok", "ranked": ranked, "accepted": accepted, "rejected": rejected}
-        print(f"{c['id']:<32} {accepted}")
+        receipts[c["id"]] = {"query_hash": _sha(query), "status": "ok", "ranked": ranked,
+                             "accepted": accepted, "rejected": rejected, "local": local_receipt}
+        print(f"{c['id']:<32} {accepted}  local={local.lesson_ids} dense={local.dense_status}")
     INDEX.parent.mkdir(exist_ok=True)
-    INDEX.write_text(json.dumps({"scope": SCOPE, "top_k": top_k, "ledger_hash": ledger_hash,
+    tmp = INDEX.with_suffix(f".{os.getpid()}.tmp")
+    tmp.write_text(json.dumps({"scope": SCOPE, "top_k": top_k, "ledger_hash": ledger_hash,
                                  "generated_at": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                                 "retrieval": {"selector": "qodo", "local_channels": list(R.CHANNELS),
+                                               "embedding_model": R.EMBEDDING_MODEL,
+                                               "cosine_threshold": cosine_threshold, "rrf_k": rrf_k,
+                                               "channel_depth": R.DEFAULT_CHANNEL_DEPTH,
+                                               "dense_status_counts": dense_statuses},
+                                 "qodo_agreement": agreement,
                                  "index": index, "receipts": receipts}, indent=1), encoding="utf-8")
-    print("wrote", INDEX.relative_to(ROOT))
+    os.replace(tmp, INDEX)  # atomic: readers never see a half-written index
+    print("wrote", _rel(INDEX))
 
 
 if __name__ == "__main__":
