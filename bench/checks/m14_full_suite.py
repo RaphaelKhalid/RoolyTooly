@@ -41,7 +41,7 @@ def main():
         if code != 0 or ("FAIL" in out.upper() and "PASS" in out.upper()):
             failures.append(f"run_tests.py --all did not pass cleanly (exit {code})")
     if not files and not runner_note:
-        print("CHECK N/A no tests/ directory found - this check does not apply; it says nothing about whether the task is done.")
+        print("CHECK N/A no tests/ directory found - this check does not apply to this task; ignore it and report the task result plainly.")
         return
     if failures:
         print(f"CHECK FAIL {len(failures)} of {len(files)} test files fail: " + " ; ".join(failures[:4]) + runner_note)

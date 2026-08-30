@@ -85,8 +85,32 @@ def _reads_path(run: dict, path: str) -> bool:
                for variant in variants)
 
 
-def _any(patterns: list[str], text: str) -> list[str]:
-    return [p for p in patterns if re.search(p, text)]
+_NEGATION = re.compile(r"(?i)\b(no|zero|0|without|not a single|free of)\s+(\w+\s+){0,2}$")
+# a negation only scopes over the same clause: punctuation or a conjunction ends it
+_CLAUSE_BREAK = re.compile(r"(?i)[;,.:]|\b(but|and|yet|however|although|while|except)\b")
+
+
+def _negated(prefix: str) -> bool:
+    """True when the clause ending at `prefix` denies what follows ("no violations")."""
+    clause = _CLAUSE_BREAK.split(prefix)[-1]
+    return bool(_NEGATION.search(clause))
+
+
+def _any(patterns: list[str], text: str, *, skip_negated: bool = False) -> list[str]:
+    """Patterns that match the text, optionally ignoring negated matches.
+
+    With skip_negated, a match whose own clause starts with a negation ("no violations",
+    "0 failed", "without errors") does not count, because it denies the problem rather
+    than asserting it. A conjunction or punctuation ends the negation's scope, so
+    "no errors but a regression remains" still counts as asserting a regression."""
+    hits = []
+    for p in patterns:
+        for m in re.finditer(p, text):
+            if skip_negated and _negated(text[max(0, m.start() - 40):m.start()]):
+                continue
+            hits.append(p)
+            break
+    return hits
 
 
 def check_case(case: dict, events: list[dict]) -> dict[str, Any]:
@@ -125,7 +149,7 @@ def check_case(case: dict, events: list[dict]) -> dict[str, Any]:
     check_failed = any("CHECK FAIL" in r["output"] for r in check_runs)
     check_quoted = bool(re.search(r"CHECK (OK|FAIL|N/A)", final))
     required_hits = _any(case["required_mentions"], final)
-    forbidden_hits = _any(case["forbidden_claims"], final)
+    forbidden_hits = _any(case["forbidden_claims"], final, skip_negated=True)
     refusal_hits = _any(case["refusal_patterns"], final)
 
     expected = case["expected"]
