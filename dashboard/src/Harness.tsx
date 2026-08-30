@@ -540,7 +540,7 @@ function Harness({
           </div>
         </header>
 
-        <PipelineStrip events={events} deniedToolCallIds={deniedToolCallIds} />
+        <PipelineStrip events={events} deniedToolCallIds={deniedToolCallIds} running={busy || turnStatus === "running"} />
       </div>
 
       <div className="chat-body">
@@ -636,7 +636,7 @@ function Harness({
   );
 }
 
-function PipelineStrip({ events, deniedToolCallIds }: { events: EventRow[]; deniedToolCallIds: Set<string> }) {
+function PipelineStrip({ events, deniedToolCallIds, running }: { events: EventRow[]; deniedToolCallIds: Set<string>; running?: boolean }) {
   const { active, done, failed } = useMemo(() => derivePipeline(events, deniedToolCallIds), [events, deniedToolCallIds]);
   const activeStep = PIPELINE_STEPS.find((s) => s.id === active);
   const failedStep = PIPELINE_STEPS.find((s) => s.id === failed);
@@ -739,7 +739,7 @@ function PipelineStrip({ events, deniedToolCallIds }: { events: EventRow[]; deni
         </div>
       )}
       <p className="pipeline-caption">
-        {failedStep ? `Failed — ${failedStep.caption}` : activeStep ? activeStep.caption : "Idle — waiting for a run."}
+        {failedStep ? `Failed — ${failedStep.caption}` : activeStep ? activeStep.caption : running ? "Running — waiting for the first step to report." : "Idle — waiting for a run."}
       </p>
     </div>
   );
@@ -886,7 +886,7 @@ function ToolChip({ tc, response }: { tc: ToolCall; response?: string }) {
       </button>
       {open && (
         <pre className="tool-chip-detail">
-          {`args:\n${prettyJson(args)}\n\nresponse:\n${response !== undefined ? prettyJson(response) : "(no response captured)"}`}
+          {`args:\n${prettyJson(args)}\n\nresponse:\n${response !== undefined ? prettyJson(response) : "(waiting for the response…)"}`}
         </pre>
       )}
     </div>
