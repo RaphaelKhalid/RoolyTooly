@@ -22,6 +22,14 @@ npm run preview
 
 To refresh evidence, rerun the Python command before building. Missing or unavailable artifacts render as `no data`; the dashboard does not substitute placeholder metrics.
 
+## Qodo rule rail
+
+The left rail lists only lesson-to-Qodo mappings recorded as `qodo_rule` rows in
+`ledger/ledger.jsonl`, together with the originating mistake family and current lesson status. The
+workspace catalog total is fetched by the snapshot builder with the read-only
+`qodo rules list --page 1 --page-size 1 --json` command when Qodo is available. The browser never
+contacts Qodo, and a missing CLI or login renders the catalog total as `no data`.
+
 ## Harness panel
 
 The "Use the agent" section on the site is a password-gated interface to a live `roolytooly` TrueForge session, proxied through `api/tf/[...path].ts` so the browser never talks to TrueForge directly.
