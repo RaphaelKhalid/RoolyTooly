@@ -1,4 +1,6 @@
-"""Local three-channel lesson retriever plus a benchmark against Qodo rule search.
+"""Local lesson retriever: three channels, RRF fusion, dense embeddings.
+
+It also ships a latency/agreement benchmark against Qodo rule search:
 
     python -m harness.rule_index bench [--queries 10]
 
@@ -99,6 +101,21 @@ def embedding_cache_key(text: str) -> str:
     return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
+def _valid_vector(vec: object) -> bool:
+    """A vector is usable only as a non-empty list of finite real numbers."""
+    if not isinstance(vec, list) or not vec:
+        return False
+    for x in vec:
+        if isinstance(x, bool) or not isinstance(x, (int, float)) or not math.isfinite(x):
+            return False
+    return True
+
+
+def _dimension_spread(vectors: dict[str, list[float]]) -> list[int]:
+    """List the distinct vector lengths in a set; more than one means corruption."""
+    return sorted({len(v) for v in vectors.values()})
+
+
 def _sanitize(message: str, key: str | None) -> str:
     """Strip any credential out of an error message and clip it to receipt size."""
     out = str(message)
@@ -116,9 +133,8 @@ def _cache_read(cache_dir: Path, digest: str) -> list[float] | None:
     if not isinstance(doc, dict) or doc.get("model") != EMBEDDING_MODEL or doc.get("sha256") != digest:
         return None
     vec = doc.get("vector")
-    if not isinstance(vec, list) or not vec or doc.get("dimensions") != len(vec):
-        return None
-    if not all(isinstance(x, (int, float)) and not isinstance(x, bool) for x in vec):
+    # a NaN/inf or ragged entry is treated as absent: a silent 0.0 cosine would look healthy
+    if not _valid_vector(vec) or doc.get("dimensions") != len(vec):
         return None
     return [float(x) for x in vec]
 
@@ -148,13 +164,14 @@ def cache_stats() -> dict:
 
 
 def embed_texts(texts: Sequence[str], *, repo_root: Path | str = ROOT, cache_dir: Path | None = None,
-                opener: Callable[..., Any] = urllib.request.urlopen,
+                opener: Callable[..., Any] | None = None,
                 timeout_s: float = EMBEDDING_TIMEOUT_S) -> tuple[dict[str, list[float]], str, str | None]:
     """Embed texts from cache, then one OpenAI call for whatever is still missing.
 
     Returns (vectors_by_text, status, error) where status is "ok", "missing_key" or "error". On
     failure the already-cached vectors are still returned, so callers can decide whether a partial
     corpus is usable; they must never treat a failure as an empty result set."""
+    opener = urllib.request.urlopen if opener is None else opener
     cdir = Path(cache_dir) if cache_dir is not None else embedding_cache_dir(repo_root)
     wanted: list[str] = []
     for t in texts:
@@ -176,6 +193,12 @@ def embed_texts(texts: Sequence[str], *, repo_root: Path | str = ROOT, cache_dir
             _STATE["cache_hits"] += 1
             vectors[t] = vec
     if not missing:
+        dims = _dimension_spread(vectors)
+        if len(dims) > 1:
+            err = f"cached embedding dimensions are inconsistent: {dims}"
+            _STATE.update({"dense_status": "error", "dense_error": err})
+            print(f"[rule_index] dense channel unavailable (error): {err}", file=sys.stderr)
+            return vectors, "error", err
         _STATE.update({"dense_status": "ok", "dense_error": None})
         return vectors, "ok", None
 
@@ -199,20 +222,27 @@ def embed_texts(texts: Sequence[str], *, repo_root: Path | str = ROOT, cache_dir
         rows = doc.get("data") if isinstance(doc, dict) else None
         if not isinstance(rows, list):
             raise ValueError(f"embeddings response has no data list: {str(doc)[:120]}")
+        # nothing is cached until the whole batch validates: a bad vector must not be persisted
+        fetched: dict[str, list[float]] = {}
         for row in rows:
             i = row.get("index")
             vec = row.get("embedding")
-            if not isinstance(i, int) or not (0 <= i < len(missing)) or not isinstance(vec, list) or not vec:
-                raise ValueError("embeddings response row is malformed")
-            vector = [float(x) for x in vec]
-            text = missing[i]
+            if not isinstance(i, int) or not (0 <= i < len(missing)):
+                raise ValueError("embeddings response row has no usable index")
+            if not _valid_vector(vec):
+                raise ValueError("embeddings response row is not a finite numeric vector")
+            fetched[missing[i]] = [float(x) for x in vec]
+        absent = [t for t in missing if t not in fetched]
+        if absent:
+            raise ValueError(f"embeddings response covered {len(missing) - len(absent)}/{len(missing)} inputs")
+        dims = _dimension_spread({**vectors, **fetched})
+        if len(dims) > 1:
+            raise ValueError(f"embedding dimensions are inconsistent: {dims}")
+        for text, vector in fetched.items():
             digest = embedding_cache_key(text)
             _VECTORS[digest] = vector
             _cache_write(cdir, digest, vector)
             vectors[text] = vector
-        absent = [t for t in missing if t not in vectors]
-        if absent:
-            raise ValueError(f"embeddings response covered {len(missing) - len(absent)}/{len(missing)} inputs")
     except Exception as exc:  # noqa: BLE001 - any embedding failure degrades, never raises
         err = _sanitize(f"{type(exc).__name__}: {exc}", key)
         _STATE.update({"dense_status": "error", "dense_error": err})
@@ -243,7 +273,7 @@ def dense_document_text(lesson: dict) -> str:
 
 @dataclass(frozen=True)
 class ChannelHit:
-    """One channel's verdict on one lesson: its one-based rank and raw score."""
+    """This records one channel's one-based rank and raw score for one lesson."""
 
     lesson_id: str
     rank: int
@@ -252,7 +282,7 @@ class ChannelHit:
 
 @dataclass
 class RetrievalHit:
-    """One fused lesson with the per-channel receipts that produced it."""
+    """This is one fused lesson plus the per-channel receipts that produced it."""
 
     lesson_id: str
     rrf_score: float
@@ -277,7 +307,7 @@ class RetrievalHit:
 
 @dataclass
 class RetrievalResult:
-    """The fused selection for one query plus the dense channel's health."""
+    """This holds the fused selection for one query and the dense channel health."""
 
     hits: list[RetrievalHit] = field(default_factory=list)
     dense_status: str = "not_run"
@@ -356,21 +386,26 @@ def reciprocal_rank_fuse(rankings: Mapping[str, Sequence[ChannelHit]], *, k: int
 def retrieve_lessons(query: str, documents: Sequence[dict], *, limit: int | None = TOP_K,
                      repo_root: Path | str = ROOT, cache_dir: Path | None = None,
                      cosine_threshold: float = DEFAULT_COSINE_THRESHOLD, rrf_k: int = DEFAULT_RRF_K,
-                     channel_depth: int = DEFAULT_CHANNEL_DEPTH,
+                     channel_depth: int = DEFAULT_CHANNEL_DEPTH, dense: bool = True,
                      embedder: Callable[..., Any] = embed_texts,
                      index: "LessonIndex | None" = None) -> RetrievalResult:
     """Fuse BM25, char-n-gram and dense rankings, gate them, and return top lessons.
 
-    The dense channel joins the fusion only when it is healthy; otherwise the result carries its
-    dense_status and retrieval proceeds on the two lexical channels alone."""
+    This is the explicit three-channel entry point, so `dense` defaults to True and callers opt
+    into the network by calling it. The dense channel joins the fusion only when it is healthy;
+    otherwise the result carries its dense_status and retrieval proceeds on the lexical channels
+    alone. Passing dense=False skips embedding entirely and reports dense_status "not_run"."""
     idx = index if index is not None else LessonIndex(list(documents))
     lessons = idx.lessons
     ids = [L.get("id", "") for L in lessons]
     bm = idx.bm25_scores(query)
     ng = idx.ngram_scores(query)
-    dense_hits, cosines, dense_status, dense_error = dense_rank(
-        query, lessons, repo_root=repo_root, cache_dir=cache_dir, threshold=cosine_threshold,
-        depth=channel_depth, embedder=embedder)
+    if dense:
+        dense_hits, cosines, dense_status, dense_error = dense_rank(
+            query, lessons, repo_root=repo_root, cache_dir=cache_dir, threshold=cosine_threshold,
+            depth=channel_depth, embedder=embedder)
+    else:  # local-only: no key is read, no request is made, no embedder is called
+        dense_hits, cosines, dense_status, dense_error = [], {}, "not_run", None
     rankings: dict[str, Sequence[ChannelHit]] = {
         "bm25": _rank_channel(ids, bm, channel_depth),
         "char_ngram": _rank_channel(ids, ng, channel_depth),
@@ -385,7 +420,9 @@ def retrieve_lessons(query: str, documents: Sequence[dict], *, limit: int | None
     fam_by_id = {L.get("id", ""): L.get("family", "") for L in lessons}
     for hit in fused:
         cos = cosines.get(hit.lesson_id) if dense_ok else None
-        hit.cosine = round(cos, 4) if cos is not None else None
+        # unrounded on purpose: the receipt must quote the value the gate compared, so a
+        # threshold can be recalibrated from receipts without a rounding disagreement
+        hit.cosine = cos
         eligible = (bm_by_id.get(hit.lesson_id, 0.0) >= BM25_GATE
                     or ng_by_id.get(hit.lesson_id, 0.0) >= NGRAM_GATE
                     or (dense_ok and cos is not None and cos >= cosine_threshold))
@@ -409,7 +446,7 @@ def retrieve_lessons(query: str, documents: Sequence[dict], *, limit: int | None
 
 
 class LessonIndex:
-    """BM25 and char-n-gram over lesson text, plus a family graph over those lessons."""
+    """The index scores lessons with BM25 and char-n-grams and groups them by family."""
 
     def __init__(self, lessons: list[dict], k1: float = 1.4, b: float = 0.75):
         self.lessons = lessons
@@ -459,19 +496,30 @@ class LessonIndex:
 
     _bm25 = bm25_scores  # kept for callers written against the pre-fusion name
 
-    def retrieve(self, query: str, limit: int | None = TOP_K, **kw: Any) -> RetrievalResult:
-        """Run the three-channel fusion over this index and return the full result."""
-        return retrieve_lessons(query, self.lessons, limit=limit, index=self, **kw)
+    def retrieve(self, query: str, limit: int | None = TOP_K, dense: bool = True,
+                 **kw: Any) -> RetrievalResult:
+        """Run the three-channel fusion over this index and return the full result.
 
-    def score(self, query: str, **kw: Any) -> list[tuple[float, dict]]:
-        """Compatibility wrapper: fused (score, lesson) pairs in descending order."""
+        This is the explicit API: `dense=True` is the default here, so calling it is the act of
+        opting into the embedding request."""
+        return retrieve_lessons(query, self.lessons, limit=limit, index=self, dense=dense, **kw)
+
+    def score(self, query: str, dense: bool = False, **kw: Any) -> list[tuple[float, dict]]:
+        """Return fused (score, lesson) pairs in descending order, lexically by default.
+
+        This wrapper predates the dense channel and stays local-only unless dense=True: callers
+        that never asked for a network call must not get one."""
         by_id = {L.get("id", ""): L for L in self.lessons}
-        res = self.retrieve(query, limit=None, **kw)
+        res = self.retrieve(query, limit=None, dense=dense, **kw)
         return [(h.score, by_id[h.lesson_id]) for h in res.hits if h.lesson_id in by_id]
 
-    def select(self, query: str, threshold: float = 0.02, top_k: int = 3, **kw: Any) -> list[str]:
-        """Compatibility wrapper: ids of the top_k lessons scoring at or above threshold."""
-        return [h.lesson_id for h in self.retrieve(query, limit=top_k, **kw).hits if h.score >= threshold]
+    def select(self, query: str, threshold: float = 0.02, top_k: int = 3, dense: bool = False,
+               **kw: Any) -> list[str]:
+        """Return ids of the top_k lessons at or above threshold, lexically by default.
+
+        Local-only unless dense=True, for the same reason as score()."""
+        hits = self.retrieve(query, limit=top_k, dense=dense, **kw).hits
+        return [h.lesson_id for h in hits if h.score >= threshold]
 
 
 def bench(n_queries: int = 10) -> dict:

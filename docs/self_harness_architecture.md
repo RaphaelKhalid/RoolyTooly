@@ -113,6 +113,19 @@ to delete a lesson the lexical channels already justified, and an uncalibrated 0
 `AND` would silently shrink the lesson set. The receipt's `gate` field records `passed` when dense
 was evaluated and `not_evaluated` when it was not, so the two regimes are never confused.
 
+**Only the explicit API opts in.** `retrieve_lessons()` / `LessonIndex.retrieve()` are the
+three-channel entry points and run dense by default; the older `LessonIndex.score()` and
+`.select()` wrappers are **local-only unless `dense=True`**, so a caller that predates the dense
+channel can never be made to open a connection by the mere presence of a key. `harness/rule_index.py`
+`bench()` and `harness/qodo_lessons.select()` both call `retrieve()`, so the harness path still opts in.
+
+**Vectors are validated before they are trusted.** Every embedding — freshly fetched or read back
+from cache — must be a non-empty list of finite reals, and every vector in a set must share one
+dimension. A `NaN`, an `inf`, or a ragged dimension degrades the whole query to `dense_status =
+"error"` and lexical-only retrieval; it must never become a silent `0.0` cosine that looks like a
+healthy "not relevant" verdict. A batch that fails validation is not written to the cache, so the
+next call retries cleanly, and a corrupt cache entry is treated as absent rather than used.
+
 **Cache and credentials.** `OPENAI_API_KEY` is read from the environment first, then from the
 gitignored `.env` at the repo root. Vectors are cached at `results/embeddings/<sha256(text)>.json`
 holding only `{model, sha256, dimensions, vector}` — never the source text, never the key — and are
@@ -134,6 +147,10 @@ lexical index may produce an empty selection.
  "channels": {<channel>: {"rank", "score"}}, "rrf_score", "score",
  "cosine", "gate": "passed"|"not_evaluated", "qodo_rank": int|null}
 ```
+
+`cosine` is recorded **unrounded**: the receipt has to quote the value the gate actually compared,
+or a threshold could never be recalibrated from receipts (a cosine of 0.41996 rounds to 0.42 and
+would contradict its own `blocked` verdict).
 
 with `dense_status`, `dense_error`, `cosine_threshold`, `rrf_k` and `channel_depth` recorded per
 case, and `retrieval` / `qodo_agreement` blocks at the top level. Qodo is reconciled by canonical
