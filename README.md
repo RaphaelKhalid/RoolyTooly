@@ -11,6 +11,8 @@ human approval gate into a skill that a completely fresh agent loads.
 
 Built solo for the WeMakeDevs × TrueFoundry Agent Harness Hackathon (Aug 29–30, 2026).
 
+Live: [roolytooly.vercel.app](https://roolytooly.vercel.app). Write-up of what was built, what was measured and what went wrong: [Blog](#blog-building-an-agent-that-stops-repeating-its-own-mistakes-in-30-hours).
+
 ## The problem
 
 AI agents make the same *families* of mistake over and over: claiming work is done when it isn't,
@@ -192,3 +194,118 @@ Every substantive change went through a Qodo-reviewed pull request.
 
 Qodo repository rules mirror the promoted lessons, so what the agent learned also becomes a review
 rule for every human PR.
+
+## Blog: building an agent that stops repeating its own mistakes (in 30 hours)
+
+*Written at the end of the WeMakeDevs × TrueFoundry Agent Harness Hackathon, Aug 29–30, 2026. Solo.
+Every number below is in the repo; where a number is weak, it says so.*
+
+### The idea
+
+Coding agents fail in *families*. They report a week-old file as fresh. They call a test suite green
+after running one file. They say "done" over an empty export. They fix the thing you asked for and
+"tidy up" three things you didn't. You correct them, and the correction dies with the chat.
+
+roolytooly makes the correction permanent — and refuses to keep it unless it can prove it works.
+The loop, end to end: the worker runs a task in a Daytona sandbox; a deterministic checker reads the
+trace of what it *actually executed* and flags the lie; a human corrects it once; the harness compiles
+that into a rule (or, better, an executable pre-claim check); a regression test shows the old agent
+fails and the new one passes; a keep/revert benchmark over 50 trap-and-control tasks says whether the
+rule helps without hurting; a human approves; the rule lands in Qodo and gets retrieved per task. The
+whole thing runs as one TrueForge agent, and the public site is just a chat window onto it.
+
+### What we tested it on
+
+The baseline was deliberately the strongest model we could afford to run hundreds of times:
+`gpt-5.6-luna` at high reasoning. The bank is 50 cases across 13 mistake families, each with a trap
+(the family's mistake is available and tempting) and a control (nothing is wrong; an honest agent
+should just say so). The control cases matter as much as the traps: a rule that makes the agent hedge
+on healthy work is a bad rule, and the benchmark treats it as one.
+
+### The findings, in the order we found them
+
+**1. Bare luna-high repeats the traps 37–45% of the time.** Not on easy ones — it saw through the
+"hollow report" trap three times out of three — but on the hard ones: stale derived artifacts, a suite
+called green after a partial run, edits outside the requested scope.
+
+**2. Prose rules don't fix the hard families for a strong model.** We compiled 36 candidate lessons
+across rule / seed / constraint / check interventions. For M09 (stale artifact) and M14 (partial test
+run), every prose variant lost the regression test: the model reads "verify the artifact is fresh" and
+still quotes the stale number. What worked was an *executable* check — a script the worker must run and
+quote (`CHECK OK|FAIL|N/A`) before claiming. Regression on those traps went from fail to pass.
+
+**3. The gate is strict, and that is the product.** Of 36 candidates, **one** was promoted
+(`les_dcfd5506`, M03), 33 were reverted by the harness's own benchmark, and two executable checks passed
+their regressions but were reverted because global injection dropped the control pass rate. We used
+those two anyway, provisionally, by injecting them only where the retriever selected them — which led
+to finding 5. Nothing was promoted by hand. The ledger says "reverted" on 35 of 36 and we left it that
+way.
+
+**4. On a real hard benchmark the harness changes the honesty number, not the skill number.** On
+LiveCodeBench-hard (`docs/livecodebench.md`): bare pass@1 0.90 with 3.3% false "completed" claims;
+with the harness, 0.93 and 0%. Pass rate is the model's number. Not lying about being done is the
+harness's. HumanEval+ turned out to be saturated for luna-high (0.958 bare) and was dropped from the
+headline.
+
+**5. The learning curve goes the right way — and it caught our own bug.** Activating the three lessons
+one at a time, retrieval-scoped, 31 cases × 2 (`docs/learning_curve.md`): mistake repetition
+**0.367 → 0.250 → 0.259 → 0.167**. Control pass rate fell 0.87 → 0.44 along the way. Reading the
+phase-3 artifact showed why, and it was us, not the model: the M09 check flagged *any* embedded
+timestamp as stale (so a fresh report dated today was called stale and the worker faithfully repeated
+it); the `CHECK N/A` text told the worker to "verify by other means before claiming", which made it hedge
+on unrelated tasks; and the scorer counted "no violations" as a violation. PR #14 fixed all three with
+tests, and re-running the controls recovered to 0.75. Three controls still fail and are listed as open.
+The harness's own mistake ledger now contains this episode.
+
+**6. Rule retrieval: 10 ms vs 3.8 s, honest about agreement.** Qodo's Agentic Toolbox is the rule
+store and the human-facing search. At run time the harness selects lessons with a local hybrid index:
+BM25 + character 3-grams + `text-embedding-3-small`, fused by reciprocal rank fusion, with an absolute
+relevance gate so an unrelated task selects nothing, and a sha256 disk cache so an embedding is paid
+for once. Warm median 10 ms against Qodo's 3.8 s on 31 holdouts; cold (one OpenAI round-trip) 382 ms;
+degrades to lexical-only with a recorded status if the key or network is gone. Agreement with Qodo:
+shares at least one rule on 81% of tasks, exact top-3 match 13% — Qodo usually returns one rule where
+we return three. Whether it *selects as well* is an open measurement, not a claim; the receipts to
+calibrate it are written on every run.
+
+**7. Mining works, and it needs sourcing rules.** Bright Data's MCP let subagents search and scrape
+developer complaints about coding agents in parallel. 64 observations in the ledger, each with an
+http URL and a verbatim quote — the ledger refuses one without. Families like "stale derived artifact"
+came from mined complaints before we ever saw luna-high make them. The demo's last preset points the
+miners at TrueForge's own issue tracker and asks for a plan.
+
+**8. The reviewer is a mistake source too.** Qodo reviewed all 18 PRs under a hard rule: no merge until
+0 bugs. It found real ones — deleting live sandboxes by age, the "no violations" scorer bug, a deny
+button painted before the request succeeded, an embedding channel reporting malformed vectors as
+healthy, a rule promotion path that trusted caller-supplied evidence. Those 130 findings are imported
+into the ledger by family and turned into rule proposals (Workflow H). Caveat we wrote down: the
+classifier is keyword heuristics, and one family is inflated by docstring-length violations.
+
+### What we learned about the tools
+
+*TrueForge.* The events API is the product: every tool call, subagent spawn and approval is an
+event, so the live pipeline strip, the evidence popovers and the Approve tap on a phone are a thin
+client over one agent. Costs: the ~10-minute turn timeout (long sweeps became server-side jobs the
+agent polls), Daytona's 10-sandbox pool and its init flake (warm-up probe, retries, a purge script), and
+remote-only MCP (a tunnel for the site). Our notes map to open issues in
+`docs/trueforge_issues_and_self_harness.md`.
+
+*Qodo.* Two roles: rule store with an overlap audit on add, and a reviewer that caught bugs on every
+PR. Rule search at ~4 s per call is why the local index exists. Importing instruction files from other
+repos produced 480 rules in the workspace; 3 of them are ours and proven — a distinction the UI now
+draws.
+
+*Bright Data.* Plugged straight into TrueForge as an MCP and ran in parallel subagents. Noisy on long
+issue threads; the sourcing rule (URL + quote or it doesn't count) is what kept the ledger clean.
+
+### What we'd do next
+
+Re-run all four learning-curve phases after the PR #14 fixes (about 45 minutes of sandbox time), and
+if the two provisional checks clear the retrieval-scoped benchmark, promote them properly so the ledger
+and Qodo agree. Label the holdout cases with the rules a human says should fire, and measure
+precision/recall for both selectors. Calibrate the cosine gate from the receipts. Then let the morning
+digest run for a week and see whether a person actually reads it.
+
+### The one-line version
+
+480 rules in the store, 3 proven. One correction, one rule, thirty-three rejected. That is what learning
+you can trust looks like.
