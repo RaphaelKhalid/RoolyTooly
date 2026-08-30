@@ -16,12 +16,23 @@ from __future__ import annotations
 import argparse
 import calendar
 import json
+import os
 import sys
 import time
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-LEDGER = ROOT / "ledger" / "ledger.jsonl"
+
+
+def _ledger_path() -> Path:
+    """Resolve the ledger file the same way the ledger server does.
+
+    ROOLY_LEDGER_DIR redirects both, so the digest always reports on the ledger the imports
+    actually wrote to. Read at call time, not at import, so a redirected run is picked up.
+    """
+    return Path(os.environ.get("ROOLY_LEDGER_DIR", ROOT / "ledger")) / "ledger.jsonl"
+
+
 RESULTS = ROOT / "results"
 DIGEST_DIR = ROOT / "docs" / "digest"
 
@@ -62,10 +73,11 @@ def _default_since() -> str:
 
 
 def _read_ledger() -> list[dict]:
-    if not LEDGER.exists():
+    ledger = _ledger_path()
+    if not ledger.exists():
         return []
     out = []
-    for line in LEDGER.read_text(encoding="utf-8").splitlines():
+    for line in ledger.read_text(encoding="utf-8").splitlines():
         line = line.strip()
         if not line:
             continue
@@ -235,9 +247,10 @@ def _open_problems() -> list[str]:
 
 
 def _bugs_caught_in_review() -> list[str]:
-    """Findings the Qodo PR reviewer caught in our own code, imported by harness/qodo_findings.py.
+    """Summarise the bugs the code reviewer caught in our own pull requests.
 
-    Reads only files on disk: the observations already in the ledger (import_key 'qodo:*') and
+    Reads only files on disk: the observations already in the ledger (import_key 'qodo:*',
+    resolved through _ledger_path so ROOLY_LEDGER_DIR is honoured) and, for the candidate rules,
     results/qodo_rule_proposals.json. Says "no data" rather than guessing when either is absent.
     """
     records = _read_ledger()

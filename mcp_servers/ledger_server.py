@@ -26,6 +26,12 @@ from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
 ROOT = Path(__file__).resolve().parents[1]
+# Running this file directly (the documented launch) puts mcp_servers/, not the repository root,
+# at the head of sys.path, so `from harness import ...` inside a tool would raise
+# ModuleNotFoundError. Put the root on the path before any tool needs a sibling package.
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 LEDGER_DIR = Path(os.environ.get("ROOLY_LEDGER_DIR", ROOT / "ledger"))
 LEDGER_DIR.mkdir(parents=True, exist_ok=True)
 LOG = LEDGER_DIR / "ledger.jsonl"
@@ -387,12 +393,14 @@ def import_qodo_findings(dry_run: bool = False) -> dict:
 
 @mcp.tool(annotations=READ)
 def qodo_rule_proposals() -> dict:
-    """Candidate rules grouped from the imported Qodo review findings (>=2 findings per family).
+    """Group the imported Qodo review findings into candidate rules.
 
-    Read-only: returns what is in results/qodo_rule_proposals.json. Nothing here is promoted -
-    each candidate still goes through compile -> falsify -> regression -> benchmark -> approval."""
+    Recomputed from the observations currently in THIS ledger on every call (>=2 findings per
+    family), never from a previously written file, so the result cannot be stale or empty after
+    a fresh import. Nothing here is promoted - each candidate still goes through
+    compile -> falsify -> regression -> benchmark -> approval."""
     from harness import qodo_findings
-    return qodo_findings.load_proposals()
+    return qodo_findings.proposals_from_ledger(ls=sys.modules[__name__])
 
 
 @mcp.tool(annotations=READ)
