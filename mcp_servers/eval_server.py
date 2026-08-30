@@ -254,7 +254,7 @@ def list_cases() -> dict:
 
 
 def _check_gate(r: dict, itype: str) -> bool:
-    """A check intervention passes only if the verifier ran, did not fail, and was quoted."""
+    """A check passes only if the verifier ran, did not fail, and was quoted."""
     sig = r.get("signals", {})
     return itype != "check" or bool(sig.get("check_ran") and sig.get("check_quoted") and not sig.get("check_failed"))
 
@@ -483,7 +483,10 @@ def lessons_for_case(case_id: str, lessons: list[dict]) -> list[dict]:
     """Return the lessons Qodo rule search selected for this case, if an index exists.
 
     results/lesson_index.json is written by `python -m harness.qodo_lessons select` (Windows side,
-    where the qodo CLI lives). Without it every active lesson is injected."""
+    where the qodo CLI lives). Without it every active lesson is injected. When the index carries a
+    local three-channel receipt for the case, it is attached to each returned lesson as
+    `retrieval_receipt`; a degraded dense channel shows up there as `dense_status` and never as an
+    empty selection - only an actually empty lexical index can produce no lessons."""
     if not LESSON_INDEX.exists():
         return lessons
     try:
@@ -499,7 +502,44 @@ def lessons_for_case(case_id: str, lessons: list[dict]) -> list[dict]:
     if case_id not in idx or idx[case_id] is None:  # unknown retrieval -> deterministic fallback: all active
         return lessons
     wanted = set(idx[case_id])
-    return [L for L in lessons if L["id"] in wanted]
+    local = ((doc.get("receipts") or {}).get(case_id) or {}).get("local") or {}
+    by_id = {h.get("lesson_id"): h for h in local.get("hits", []) if isinstance(h, dict)}
+    selected = [L for L in lessons if L["id"] in wanted]
+    if not local:
+        return selected
+    return [{**L, "retrieval_receipt": {**by_id.get(L["id"], {"channels_fired": ["qodo"]}),
+                                        "dense_status": local.get("dense_status"),
+                                        "dense_error": local.get("dense_error")}} for L in selected]
+
+
+def retrieval_provenance() -> dict:
+    """Report the embedding/fusion configuration and the dense channel's last status.
+
+    Kept out of `harness_manifest`'s return value on purpose: that dict is posted verbatim to
+    TrueForge as a session spec, so retrieval provenance is exposed here instead and recorded in
+    results/lesson_index.json. Embedding vectors and cache files are named, never expanded."""
+    doc = {}
+    if LESSON_INDEX.exists():
+        try:
+            doc = json.loads(LESSON_INDEX.read_text(encoding="utf-8")).get("retrieval") or {}
+        except (OSError, json.JSONDecodeError):
+            doc = {}
+    out = {"embedding_model": doc.get("embedding_model", "text-embedding-3-small"),
+           "cosine_threshold": doc.get("cosine_threshold", 0.42),
+           "rrf_k": doc.get("rrf_k", 60), "channel_depth": doc.get("channel_depth", 50),
+           "local_channels": doc.get("local_channels", ["bm25", "char_ngram", "dense"]),
+           "selector": doc.get("selector", "qodo"),
+           "embedding_cache": "results/embeddings/<sha256>.json (generated artifact, not hashed)",
+           "dense_status_counts": doc.get("dense_status_counts", {}),
+           "cache_hits": None, "cache_misses": None}
+    try:
+        from harness import rule_index as _R  # optional: only present on the Windows harness side
+        stats = _R.cache_stats()
+        out.update({"cache_hits": stats.get("cache_hits"), "cache_misses": stats.get("cache_misses"),
+                    "last_dense_status": stats.get("dense_status")})
+    except Exception:  # noqa: BLE001 - provenance is diagnostics; never fail a run for it
+        out["last_dense_status"] = (doc.get("dense_status_counts") or {})
+    return out
 
 
 def harness_manifest(lessons: list[dict] | None = None, case_id: str | None = None) -> dict:
@@ -533,7 +573,9 @@ def harness_manifest(lessons: list[dict] | None = None, case_id: str | None = No
 
 
 def _check_name(L: dict) -> str:
-    """Name under bench/checks/ carried by a check lesson (explicit field or in its preflight text)."""
+    """Name under bench/checks/ carried by a check lesson, if it declares one.
+
+    Read from an explicit `check_script` field, else from a path in its preflight text."""
     import re as _re
     if L.get("check_script"):
         return str(L["check_script"])
