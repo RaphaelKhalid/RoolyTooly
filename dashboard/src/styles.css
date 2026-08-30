@@ -373,11 +373,14 @@ h3 { margin: 0 0 12px; font-size: 13px; font-weight: 600; text-transform: upperc
   50% { box-shadow: 0 0 0 6px rgba(245, 197, 66, 0); }
 }
 
+/* position: fixed + viewport coordinates set inline by PipelineStrip, and
+   rendered as a sibling of .pipeline-strip rather than nested inside it —
+   .pipeline-strip scrolls horizontally (overflow-x: auto), which clipped an
+   absolutely-positioned popover nested inside it (Qodo: "popovers clipped by
+   strip"). Fixed positioning outside that box paints over the whole page
+   instead. */
 .pipeline-popover {
-  display: none;
-  position: absolute;
-  top: calc(100% + 10px);
-  left: 50%;
+  position: fixed;
   transform: translateX(-50%);
   z-index: 40;
   width: 240px;
@@ -390,11 +393,6 @@ h3 { margin: 0 0 12px; font-size: 13px; font-weight: 600; text-transform: upperc
   -webkit-backdrop-filter: blur(10px);
   box-shadow: 0 10px 28px rgba(0, 0, 0, .4);
   text-align: left;
-}
-.pipeline-popover.open { display: block; }
-@media (hover: hover) {
-  .pipeline-step:hover .pipeline-popover,
-  .pipeline-pill:focus-visible ~ .pipeline-popover { display: block; }
 }
 .pipeline-popover-caption { margin: 0 0 8px; color: var(--ink); font-size: 12px; line-height: 1.45; }
 .pipeline-popover-row { margin: 6px 0 0; font-size: 11px; line-height: 1.4; }
@@ -720,10 +718,25 @@ h3 { margin: 0 0 12px; font-size: 13px; font-weight: 600; text-transform: upperc
 .row { display: flex; justify-content: space-between; padding: 7px 0; border-top: 1px solid var(--line); font-size: 13px; }
 .row b { color: var(--ink); }
 
+/* contest box + retrieval-speed card, side by side on wide screens */
+.evidence-row { display: flex; align-items: stretch; gap: 16px; }
+.evidence-row .compare { flex: 1; min-width: 0; }
+.retrieval-card { display: flex; flex-direction: column; }
+.retrieval-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 12px; flex: 1; }
+.retrieval-stat { padding: 12px; border: 1px solid var(--line); border-radius: 10px; display: flex; align-items: flex-end; }
+.retrieval-stat.accent { border-color: var(--fuchsia); background: var(--tint); }
+.retrieval-stat .big { font-size: 28px; margin-bottom: 0; }
+.retrieval-stat .big span { text-transform: none; letter-spacing: 0; font-size: 10px; }
+
 footer { margin-top: 8px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 12px; }
 
 @media (max-width: 900px) {
   .compare-grid { grid-template-columns: 1fr; }
+  .evidence-row { flex-direction: column; }
+}
+
+@media (max-width: 480px) {
+  .retrieval-grid { grid-template-columns: 1fr; }
 }
 
 @media (max-width: 600px) {

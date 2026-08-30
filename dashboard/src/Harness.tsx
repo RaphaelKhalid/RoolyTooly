@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   createSession,
   startTurn,
@@ -30,6 +30,10 @@ const PRESETS: { label: string; text: string }[] = [
   {
     label: "Correct it once → compile a lesson",
     text: "Correction: the printed summary is a cached value; report.json says the score is null. Never report a value you haven't read from the artifact. Compile this into a lesson, test it, and take it through the transfer test and the PR.",
+  },
+  {
+    label: "Plan from TrueForge's open issues",
+    text: "Hey roolytooly, look at all open issues on TrueForge's GitHub (truefoundry/trueforge) and make a plan for improving this harness: cluster the issues into mistake families, check which families we already have rules for, and propose the three rules or checks we should compile next. Show your steps.",
   },
 ];
 
@@ -134,6 +138,7 @@ function MarkdownLite({ text }: { text: string }) {
 }
 
 type PipelineStepId =
+  | "mine"
   | "worker"
   | "trace"
   | "correction"
@@ -148,6 +153,7 @@ type PipelineStepId =
   | "pr";
 
 const PIPELINE_STEPS: { id: PipelineStepId; label: string; caption: string }[] = [
+  { id: "mine", label: "mine", caption: "Mine: scanning real-world issues/reports and searching the ledger for families that already have rules." },
   { id: "worker", label: "worker run", caption: "Worker run: the agent attempts the task inside the sandbox." },
   { id: "trace", label: "trace check", caption: "Trace check: verifying the agent actually read the artifact before reporting on it." },
   { id: "correction", label: "correction", caption: "Correction: a human points out the mistake in plain language." },
@@ -172,8 +178,26 @@ function parseJsonSafe(raw: string | null | undefined): Record<string, unknown> 
   }
 }
 
+// Tool names that count as "mining": scanning real-world sources (brightdata
+// search/scrape, or a urllib/Code Mode fetch) and searching the ledger to see
+// which mistake families already have rules (Workflow C and Workflow H).
+const MINE_TOOL_NAMES = new Set([
+  "search_engine",
+  "search_engine_batch",
+  "scrape_as_markdown",
+  "scrape_batch",
+  "record_observation",
+  "observation_stats",
+  "list_families",
+  "get_active_lessons",
+  "execute_code",
+  "run_code",
+  "code_mode",
+]);
+
 function stepForToolCall(name?: string, args?: string): PipelineStepId | null {
   if (!name) return null;
+  if (MINE_TOOL_NAMES.has(name)) return "mine";
   switch (name) {
     case "run_worker":
       return "worker";
@@ -183,6 +207,7 @@ function stepForToolCall(name?: string, args?: string): PipelineStepId | null {
       const a = (args ?? "").toLowerCase();
       if (a.includes("lesson-compiler")) return "compile";
       if (a.includes("falsifier")) return "falsify";
+      if (a.includes("mistake-miner")) return "mine";
       return null;
     }
     case "run_regression":
@@ -454,11 +479,15 @@ function Harness({
 
   const approve = async (threadId: string, toolCallId: string, allow: boolean) => {
     if (!sessionId || !turnId) return;
-    if (!allow) setDeniedToolCallIds((prev) => new Set(prev).add(toolCallId));
     setBusy(true);
     setError(null);
     try {
       const newTurnId = await resumeApproval(sessionId, threadId, toolCallId, allow, turnId);
+      // Only record the denial once the server has actually accepted it — a
+      // network/API failure below must not leave a pipeline step painted
+      // "failed" for a denial that never took effect (Qodo: "failed request
+      // marks denial").
+      if (!allow) setDeniedToolCallIds((prev) => new Set(prev).add(toolCallId));
       setTurnId(newTurnId);
       setTurnStatus("running");
       setRequiredActions([]);
@@ -612,58 +641,108 @@ function PipelineStrip({ events, deniedToolCallIds }: { events: EventRow[]; deni
   const activeStep = PIPELINE_STEPS.find((s) => s.id === active);
   const failedStep = PIPELINE_STEPS.find((s) => s.id === failed);
   const activePillRef = useRef<HTMLButtonElement | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const pillRefs = useRef<Map<PipelineStepId, HTMLButtonElement>>(new Map());
   const [openStep, setOpenStep] = useState<PipelineStepId | null>(null);
+  // Viewport coordinates (not container-relative), so the popover can be
+  // position: fixed and painted outside .pipeline-strip's horizontal-scroll
+  // clipping box instead of being cut off inside that short row (Qodo:
+  // "popovers clipped by strip").
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     activePillRef.current?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
   }, [active]);
 
+  useLayoutEffect(() => {
+    if (!openStep) {
+      setPopoverPos(null);
+      return;
+    }
+    const el = pillRefs.current.get(openStep);
+    if (!el) {
+      setPopoverPos(null);
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    setPopoverPos({ top: rect.bottom + 10, left: rect.left + rect.width / 2 });
+  }, [openStep]);
+
+  // The popover's fixed position is computed once on open; if the strip
+  // scrolls (or the page does) close it rather than let it drift stale over
+  // the wrong pill.
+  useEffect(() => {
+    if (!openStep) return;
+    const close = () => setOpenStep(null);
+    const stripEl = stripRef.current;
+    stripEl?.addEventListener("scroll", close, { passive: true });
+    window.addEventListener("scroll", close, { passive: true, capture: true });
+    window.addEventListener("resize", close);
+    return () => {
+      stripEl?.removeEventListener("scroll", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [openStep]);
+
+  const openFor = (id: PipelineStepId) => setOpenStep(id);
+  const closeFor = (id: PipelineStepId) => setOpenStep((cur) => (cur === id ? null : cur));
+  const openStepDef = PIPELINE_STEPS.find((s) => s.id === openStep);
+  const openEvidence = openStep ? latestStepEvidence(events, openStep) : null;
+
   return (
     <div className="pipeline-bar">
-      <div className="pipeline-strip">
+      <div className="pipeline-strip" ref={stripRef}>
         {PIPELINE_STEPS.map((s) => {
           const state = s.id === failed ? "failed" : s.id === active ? "active" : done.has(s.id) ? "done" : "idle";
-          const evidence = latestStepEvidence(events, s.id);
           const isOpen = openStep === s.id;
           return (
             <div className="pipeline-step" key={s.id}>
               <button
                 type="button"
                 className={`pipeline-pill ${state}`}
-                ref={s.id === active || s.id === failed ? activePillRef : undefined}
+                ref={(el) => {
+                  if (el) pillRefs.current.set(s.id, el);
+                  else pillRefs.current.delete(s.id);
+                  if (s.id === active || s.id === failed) activePillRef.current = el;
+                }}
                 aria-expanded={isOpen}
                 onClick={() => setOpenStep((cur) => (cur === s.id ? null : s.id))}
+                onMouseEnter={() => openFor(s.id)}
+                onMouseLeave={() => closeFor(s.id)}
+                onFocus={() => openFor(s.id)}
+                onBlur={() => closeFor(s.id)}
               >
                 {s.label}
               </button>
-              <div className={`pipeline-popover${isOpen ? " open" : ""}`} role="tooltip">
-                <p className="pipeline-popover-caption">{s.caption}</p>
-                <p className="pipeline-popover-row">
-                  <span>last call</span>
-                  <code>{evidence.call ?? "no data"}</code>
-                </p>
-                <p className="pipeline-popover-row">
-                  <span>response</span>
-                  <code>{evidence.snippet ?? "no data"}</code>
-                </p>
-              </div>
             </div>
           );
         })}
       </div>
+      {openStepDef && popoverPos && (
+        <div
+          className="pipeline-popover open"
+          role="tooltip"
+          style={{ top: popoverPos.top, left: popoverPos.left }}
+          onMouseEnter={() => openFor(openStepDef.id)}
+          onMouseLeave={() => closeFor(openStepDef.id)}
+        >
+          <p className="pipeline-popover-caption">{openStepDef.caption}</p>
+          <p className="pipeline-popover-row">
+            <span>last call</span>
+            <code>{openEvidence?.call ?? "no data"}</code>
+          </p>
+          <p className="pipeline-popover-row">
+            <span>response</span>
+            <code>{openEvidence?.snippet ?? "no data"}</code>
+          </p>
+        </div>
+      )}
       <p className="pipeline-caption">
         {failedStep ? `Failed — ${failedStep.caption}` : activeStep ? activeStep.caption : "Idle — waiting for a run."}
       </p>
     </div>
   );
-}
-
-// Wraps latestStepEvidence in a stable per-render memo without a hook-order
-// hazard: the number and identity of pipeline steps never changes, so
-// calling this once per fixed step inside the steps.map is safe.
-function useMemoStepEvidence(events: EventRow[], stepId: PipelineStepId) {
-  // eslint-disable-next-line react-hooks/rules-of-hooks
-  return useMemo(() => latestStepEvidence(events, stepId), [events, stepId]);
 }
 
 function ChatFeed({ events, sentByTurn }: { events: EventRow[]; sentByTurn: Record<string, string> }) {
