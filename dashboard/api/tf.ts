@@ -6,18 +6,14 @@ function safeParse(text: string): any {
     return {};
   }
 }
-// Requires x-harness-password to match HARNESS_PASSWORD; forwards to TRUEFORGE_URL.
+// Public demo proxy: forwards sessions/* calls to TRUEFORGE_URL for the contained demo agent.
+// No password: the agent is scoped (demo manifest, no repo/file access) and DELETE is blocked below.
 export default async function handler(req: any, res: any) {
   res.setHeader("Cache-Control", "no-store");
 
-  const { HARNESS_PASSWORD, TRUEFORGE_URL } = process.env;
-  if (!HARNESS_PASSWORD || !TRUEFORGE_URL) {
-    res.status(500).json({ error: "Server misconfigured: set HARNESS_PASSWORD and TRUEFORGE_URL in Vercel." });
-    return;
-  }
-
-  if (req.headers["x-harness-password"] !== HARNESS_PASSWORD) {
-    res.status(401).json({ error: "Unauthorized" });
+  const { TRUEFORGE_URL } = process.env;
+  if (!TRUEFORGE_URL) {
+    res.status(500).json({ error: "Server misconfigured: set TRUEFORGE_URL in Vercel." });
     return;
   }
 

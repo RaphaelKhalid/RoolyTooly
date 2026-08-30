@@ -2,11 +2,14 @@
 
 const PASSWORD_KEY = "tf_harness_password";
 
+// The demo is open: no password is required, so the stored value is only kept for compatibility.
+const OPEN_ACCESS = "open";
+
 export function getStoredPassword(): string {
   try {
-    return sessionStorage.getItem(PASSWORD_KEY) ?? "";
+    return sessionStorage.getItem(PASSWORD_KEY) || OPEN_ACCESS;
   } catch {
-    return "";
+    return OPEN_ACCESS;
   }
 }
 
