@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import {
   createSession,
   startTurn,
@@ -31,6 +31,10 @@ const PRESETS: { label: string; text: string }[] = [
     label: "Correct it once → compile a lesson",
     text: "Correction: the printed summary is a cached value; report.json says the score is null. Never report a value you haven't read from the artifact. Compile this into a lesson, test it, and take it through the transfer test and the PR.",
   },
+  {
+    label: "Plan from TrueForge's open issues",
+    text: "Hey roolytooly, look at all open issues on TrueForge's GitHub (truefoundry/trueforge) and make a plan for improving this harness: cluster the issues into mistake families, check which families we already have rules for, and propose the three rules or checks we should compile next. Show your steps.",
+  },
 ];
 
 const shortId = (id: string) => (id.length > 8 ? id.slice(0, 8) : id);
@@ -39,7 +43,102 @@ const truncate = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…`
 const PROMPT_TRUNCATE_AT = 220;
 const PROMPT_PREVIEW_LEN = 200;
 
+const FIRST_RUN_HINT_KEY = "rt_first_run_hint_dismissed";
+
+// ---- tiny markdown-lite renderer for assistant prose (no dependency) ----
+// Handles **bold**, `code` spans, and paragraphs/bullet/numbered lists.
+// Anything else (headings, links, tables) renders as plain text — assistant
+// replies are short status prose, not documents.
+
+type MdBlock = { type: "p"; text: string } | { type: "ul" | "ol"; items: string[] };
+
+function parseMarkdownLite(raw: string): MdBlock[] {
+  const lines = raw.replace(/\r\n/g, "\n").split("\n");
+  const blocks: MdBlock[] = [];
+  let para: string[] = [];
+  let list: { type: "ul" | "ol"; items: string[] } | null = null;
+
+  const flushPara = () => {
+    if (para.length) blocks.push({ type: "p", text: para.join(" ").trim() });
+    para = [];
+  };
+  const flushList = () => {
+    if (list && list.items.length) blocks.push(list);
+    list = null;
+  };
+
+  for (const rawLine of lines) {
+    const line = rawLine.trim();
+    if (!line) {
+      flushPara();
+      flushList();
+      continue;
+    }
+    const bullet = /^[-*]\s+(.*)$/.exec(line);
+    const numbered = /^\d+[.)]\s+(.*)$/.exec(line);
+    if (bullet) {
+      flushPara();
+      if (!list || list.type !== "ul") {
+        flushList();
+        list = { type: "ul", items: [] };
+      }
+      list.items.push(bullet[1]);
+    } else if (numbered) {
+      flushPara();
+      if (!list || list.type !== "ol") {
+        flushList();
+        list = { type: "ol", items: [] };
+      }
+      list.items.push(numbered[1]);
+    } else {
+      flushList();
+      para.push(line);
+    }
+  }
+  flushPara();
+  flushList();
+  return blocks;
+}
+
+// Splits inline **bold** and `code` spans out of a line of text.
+function renderInline(text: string, keyPrefix: string): ReactNode[] {
+  const parts: ReactNode[] = [];
+  const re = /\*\*(.+?)\*\*|`([^`]+)`/g;
+  let lastIndex = 0;
+  let i = 0;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text))) {
+    if (m.index > lastIndex) parts.push(text.slice(lastIndex, m.index));
+    if (m[1] !== undefined) {
+      parts.push(<strong key={`${keyPrefix}-b-${i++}`}>{m[1]}</strong>);
+    } else if (m[2] !== undefined) {
+      parts.push(
+        <span className="inline-code" key={`${keyPrefix}-c-${i++}`}>
+          {m[2]}
+        </span>
+      );
+    }
+    lastIndex = re.lastIndex;
+  }
+  if (lastIndex < text.length) parts.push(text.slice(lastIndex));
+  return parts;
+}
+
+function MarkdownLite({ text }: { text: string }) {
+  const blocks = useMemo(() => parseMarkdownLite(text), [text]);
+  return (
+    <>
+      {blocks.map((b, i) => {
+        if (b.type === "p") return <p key={i}>{renderInline(b.text, `p${i}`)}</p>;
+        const items = b.items.map((item, j) => <li key={j}>{renderInline(item, `l${i}-${j}`)}</li>);
+        return b.type === "ul" ? <ul key={i}>{items}</ul> : <ol key={i}>{items}</ol>;
+      })}
+    </>
+  );
+}
+
 type PipelineStepId =
+  | "mine"
   | "worker"
   | "trace"
   | "correction"
@@ -54,6 +153,7 @@ type PipelineStepId =
   | "pr";
 
 const PIPELINE_STEPS: { id: PipelineStepId; label: string; caption: string }[] = [
+  { id: "mine", label: "mine", caption: "Mine: scanning real-world issues/reports and searching the ledger for families that already have rules." },
   { id: "worker", label: "worker run", caption: "Worker run: the agent attempts the task inside the sandbox." },
   { id: "trace", label: "trace check", caption: "Trace check: verifying the agent actually read the artifact before reporting on it." },
   { id: "correction", label: "correction", caption: "Correction: a human points out the mistake in plain language." },
@@ -68,8 +168,36 @@ const PIPELINE_STEPS: { id: PipelineStepId; label: string; caption: string }[] =
   { id: "pr", label: "PR", caption: "PR: the change opens a pull request for review." },
 ];
 
+function parseJsonSafe(raw: string | null | undefined): Record<string, unknown> | null {
+  if (!raw) return null;
+  try {
+    const parsed = JSON.parse(raw);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : null;
+  } catch {
+    return null;
+  }
+}
+
+// Tool names that count as "mining": scanning real-world sources (brightdata
+// search/scrape, or a urllib/Code Mode fetch) and searching the ledger to see
+// which mistake families already have rules (Workflow C and Workflow H).
+const MINE_TOOL_NAMES = new Set([
+  "search_engine",
+  "search_engine_batch",
+  "scrape_as_markdown",
+  "scrape_batch",
+  "record_observation",
+  "observation_stats",
+  "list_families",
+  "get_active_lessons",
+  "execute_code",
+  "run_code",
+  "code_mode",
+]);
+
 function stepForToolCall(name?: string, args?: string): PipelineStepId | null {
   if (!name) return null;
+  if (MINE_TOOL_NAMES.has(name)) return "mine";
   switch (name) {
     case "run_worker":
       return "worker";
@@ -79,6 +207,7 @@ function stepForToolCall(name?: string, args?: string): PipelineStepId | null {
       const a = (args ?? "").toLowerCase();
       if (a.includes("lesson-compiler")) return "compile";
       if (a.includes("falsifier")) return "falsify";
+      if (a.includes("mistake-miner")) return "mine";
       return null;
     }
     case "run_regression":
@@ -100,17 +229,31 @@ function stepForToolCall(name?: string, args?: string): PipelineStepId | null {
   }
 }
 
-function derivePipeline(events: EventRow[]): { active: PipelineStepId | null; done: Set<PipelineStepId> } {
+function derivePipeline(
+  events: EventRow[],
+  deniedToolCallIds?: Set<string>
+): { active: PipelineStepId | null; done: Set<PipelineStepId>; failed: PipelineStepId | null } {
   const done = new Set<PipelineStepId>();
   let active: PipelineStepId | null = null;
+  let failed: PipelineStepId | null = null;
   let lastCallStep: PipelineStepId | null = null;
+  const stepByCallId = new Map<string, PipelineStepId>();
 
   const advance = (step: PipelineStepId) => {
+    if (failed) return;
     if (active && active !== step) done.add(active);
     active = step;
   };
 
+  const markFailed = (step: PipelineStepId | null) => {
+    if (failed || !step) return;
+    failed = step;
+    done.delete(step);
+    active = step;
+  };
+
   for (const row of events) {
+    if (failed) break;
     const ev = row.event;
     if (ev.type === "model.message") {
       for (const tc of ev.tool_calls ?? []) {
@@ -118,6 +261,7 @@ function derivePipeline(events: EventRow[]): { active: PipelineStepId | null; do
         if (step) {
           advance(step);
           lastCallStep = step;
+          if (tc.id) stepByCallId.set(tc.id, step);
         }
       }
     } else if (ev.type === "tool.response") {
@@ -125,12 +269,53 @@ function derivePipeline(events: EventRow[]): { active: PipelineStepId | null; do
         advance("trace");
         lastCallStep = null;
       }
+      const step = ev.tool_call_id ? stepByCallId.get(ev.tool_call_id) ?? active : active;
+      const parsed = parseJsonSafe(ev.content);
+      if (parsed) {
+        if (parsed.error) {
+          markFailed(step);
+        } else if (step === "regression" && parsed.valid_regression_test === false) {
+          markFailed("regression");
+        } else if (step === "benchmark" && parsed.decision === "revert") {
+          markFailed("benchmark");
+        }
+      }
     } else if (ev.type === "tool.approval_required") {
       advance("approval");
+      for (const tc of ev.tool_calls ?? []) {
+        if (tc.id && deniedToolCallIds?.has(tc.id)) markFailed("approval");
+      }
     }
   }
 
-  return { active, done };
+  return { active, done, failed };
+}
+
+// Find the most recent tool call mapped to this pipeline step and its paired
+// response, for the step's hover/tap popover. O(n^2) worst case but event
+// lists here are small (a demo session, not a production log stream).
+function latestStepEvidence(events: EventRow[], stepId: PipelineStepId): { call: string | null; snippet: string | null } {
+  for (let i = events.length - 1; i >= 0; i--) {
+    const ev = events[i].event;
+    if (ev.type !== "model.message") continue;
+    const calls = ev.tool_calls ?? [];
+    for (let j = calls.length - 1; j >= 0; j--) {
+      const tc = calls[j];
+      if (stepForToolCall(tc.function?.name, tc.function?.arguments) !== stepId) continue;
+      const name = tc.function?.name ?? "tool";
+      const args = tc.function?.arguments ?? "";
+      const call = summarizeToolCall(name, args);
+      let snippet: string | null = null;
+      for (const row of events) {
+        if (row.event.type === "tool.response" && row.event.tool_call_id === tc.id) {
+          const raw = row.event.content ?? "";
+          snippet = raw ? (raw.length > 200 ? `${raw.slice(0, 200)}…` : raw) : null;
+        }
+      }
+      return { call, snippet };
+    }
+  }
+  return { call: null, snippet: null };
 }
 
 // Known subagent roles the create_sub_agent tool spawns. Used only to label
@@ -169,7 +354,13 @@ function collectResponses(events: EventRow[], _startIndex: number, toolCalls: { 
   return toolCalls.map((tc) => byId.get(tc.id));
 }
 
-function Harness() {
+function Harness({
+  onOpenRules,
+  onSessionActiveChange,
+}: {
+  onOpenRules?: () => void;
+  onSessionActiveChange?: (active: boolean) => void;
+}) {
   const [password, setPassword] = useState(() => getStoredPassword());
   const [passwordDraft, setPasswordDraft] = useState(password);
   const [error, setError] = useState<string | null>(null);
@@ -181,7 +372,35 @@ function Harness() {
   const [message, setMessage] = useState("");
   const [busy, setBusy] = useState(false);
   const [sentByTurn, setSentByTurn] = useState<Record<string, string>>({});
+  const [deniedToolCallIds, setDeniedToolCallIds] = useState<Set<string>>(new Set());
+  const [showFirstRunHint, setShowFirstRunHint] = useState(() => {
+    try {
+      return sessionStorage.getItem(FIRST_RUN_HINT_KEY) !== "1";
+    } catch {
+      return true;
+    }
+  });
   const pollRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    onSessionActiveChange?.(Boolean(sessionId));
+  }, [sessionId, onSessionActiveChange]);
+
+  // First-run hint disappears permanently on the first tap/click anywhere on
+  // the page, not just on the button it points at.
+  useEffect(() => {
+    if (!showFirstRunHint) return;
+    const dismiss = () => {
+      setShowFirstRunHint(false);
+      try {
+        sessionStorage.setItem(FIRST_RUN_HINT_KEY, "1");
+      } catch {
+        // sessionStorage unavailable — hint just won't persist across reloads
+      }
+    };
+    window.addEventListener("pointerdown", dismiss, { capture: true, once: true });
+    return () => window.removeEventListener("pointerdown", dismiss, true);
+  }, [showFirstRunHint]);
 
   const stopPolling = () => {
     if (pollRef.current !== null) {
@@ -231,6 +450,7 @@ function Harness() {
       setRequiredActions([]);
       setEvents([]);
       setSentByTurn({});
+      setDeniedToolCallIds(new Set());
     } catch (e) {
       handleError(e);
     } finally {
@@ -263,6 +483,11 @@ function Harness() {
     setError(null);
     try {
       const newTurnId = await resumeApproval(sessionId, threadId, toolCallId, allow, turnId);
+      // Only record the denial once the server has actually accepted it — a
+      // network/API failure below must not leave a pipeline step painted
+      // "failed" for a denial that never took effect (Qodo: "failed request
+      // marks denial").
+      if (!allow) setDeniedToolCallIds((prev) => new Set(prev).add(toolCallId));
       setTurnId(newTurnId);
       setTurnStatus("running");
       setRequiredActions([]);
@@ -302,11 +527,20 @@ function Harness() {
             )}
             <button className="new-session-btn" onClick={() => void newSession()} disabled={busy || locked}>
               New session
+              {showFirstRunHint && !sessionId && (
+                <span className="first-run-hint" aria-hidden="true">
+                  <span className="first-run-hint-arrow">↑</span>
+                  <span className="first-run-hint-label">start here</span>
+                </span>
+              )}
+            </button>
+            <button className="rules-btn" onClick={() => onOpenRules?.()} aria-label="Open Qodo rules panel">
+              Rules
             </button>
           </div>
         </header>
 
-        <PipelineStrip events={events} />
+        <PipelineStrip events={events} deniedToolCallIds={deniedToolCallIds} />
       </div>
 
       <div className="chat-body">
@@ -402,33 +636,111 @@ function Harness() {
   );
 }
 
-function PipelineStrip({ events }: { events: EventRow[] }) {
-  const { active, done } = useMemo(() => derivePipeline(events), [events]);
+function PipelineStrip({ events, deniedToolCallIds }: { events: EventRow[]; deniedToolCallIds: Set<string> }) {
+  const { active, done, failed } = useMemo(() => derivePipeline(events, deniedToolCallIds), [events, deniedToolCallIds]);
   const activeStep = PIPELINE_STEPS.find((s) => s.id === active);
-  const activePillRef = useRef<HTMLSpanElement | null>(null);
+  const failedStep = PIPELINE_STEPS.find((s) => s.id === failed);
+  const activePillRef = useRef<HTMLButtonElement | null>(null);
+  const stripRef = useRef<HTMLDivElement | null>(null);
+  const pillRefs = useRef<Map<PipelineStepId, HTMLButtonElement>>(new Map());
+  const [openStep, setOpenStep] = useState<PipelineStepId | null>(null);
+  // Viewport coordinates (not container-relative), so the popover can be
+  // position: fixed and painted outside .pipeline-strip's horizontal-scroll
+  // clipping box instead of being cut off inside that short row (Qodo:
+  // "popovers clipped by strip").
+  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
 
   useEffect(() => {
     activePillRef.current?.scrollIntoView({ block: "nearest", inline: "center", behavior: "smooth" });
   }, [active]);
 
+  useLayoutEffect(() => {
+    if (!openStep) {
+      setPopoverPos(null);
+      return;
+    }
+    const el = pillRefs.current.get(openStep);
+    if (!el) {
+      setPopoverPos(null);
+      return;
+    }
+    const rect = el.getBoundingClientRect();
+    setPopoverPos({ top: rect.bottom + 10, left: rect.left + rect.width / 2 });
+  }, [openStep]);
+
+  // The popover's fixed position is computed once on open; if the strip
+  // scrolls (or the page does) close it rather than let it drift stale over
+  // the wrong pill.
+  useEffect(() => {
+    if (!openStep) return;
+    const close = () => setOpenStep(null);
+    const stripEl = stripRef.current;
+    stripEl?.addEventListener("scroll", close, { passive: true });
+    window.addEventListener("scroll", close, { passive: true, capture: true });
+    window.addEventListener("resize", close);
+    return () => {
+      stripEl?.removeEventListener("scroll", close);
+      window.removeEventListener("scroll", close, true);
+      window.removeEventListener("resize", close);
+    };
+  }, [openStep]);
+
+  const openFor = (id: PipelineStepId) => setOpenStep(id);
+  const closeFor = (id: PipelineStepId) => setOpenStep((cur) => (cur === id ? null : cur));
+  const openStepDef = PIPELINE_STEPS.find((s) => s.id === openStep);
+  const openEvidence = openStep ? latestStepEvidence(events, openStep) : null;
+
   return (
     <div className="pipeline-bar">
-      <div className="pipeline-strip">
+      <div className="pipeline-strip" ref={stripRef}>
         {PIPELINE_STEPS.map((s) => {
-          const state = s.id === active ? "active" : done.has(s.id) ? "done" : "idle";
+          const state = s.id === failed ? "failed" : s.id === active ? "active" : done.has(s.id) ? "done" : "idle";
+          const isOpen = openStep === s.id;
           return (
             <div className="pipeline-step" key={s.id}>
-              <span
+              <button
+                type="button"
                 className={`pipeline-pill ${state}`}
-                ref={s.id === active ? activePillRef : undefined}
+                ref={(el) => {
+                  if (el) pillRefs.current.set(s.id, el);
+                  else pillRefs.current.delete(s.id);
+                  if (s.id === active || s.id === failed) activePillRef.current = el;
+                }}
+                aria-expanded={isOpen}
+                onClick={() => setOpenStep((cur) => (cur === s.id ? null : s.id))}
+                onMouseEnter={() => openFor(s.id)}
+                onMouseLeave={() => closeFor(s.id)}
+                onFocus={() => openFor(s.id)}
+                onBlur={() => closeFor(s.id)}
               >
                 {s.label}
-              </span>
+              </button>
             </div>
           );
         })}
       </div>
-      <p className="pipeline-caption">{activeStep ? activeStep.caption : "Idle — waiting for a run."}</p>
+      {openStepDef && popoverPos && (
+        <div
+          className="pipeline-popover open"
+          role="tooltip"
+          style={{ top: popoverPos.top, left: popoverPos.left }}
+          onMouseEnter={() => openFor(openStepDef.id)}
+          onMouseLeave={() => closeFor(openStepDef.id)}
+        >
+          <p className="pipeline-popover-caption">{openStepDef.caption}</p>
+          <p className="pipeline-popover-row">
+            <span>last call</span>
+            <code>{openEvidence?.call ?? "no data"}</code>
+          </p>
+          <p className="pipeline-popover-row">
+            <span>response</span>
+            <code>{openEvidence?.snippet ?? "no data"}</code>
+          </p>
+        </div>
+      )}
+      <p className="pipeline-caption">
+        {failedStep ? `Failed — ${failedStep.caption}` : activeStep ? activeStep.caption : "Idle — waiting for a run."}
+      </p>
     </div>
   );
 }
@@ -482,7 +794,7 @@ function EventRowView({
           <div className="msg-row sub">
             <div className="bubble sub-bubble">
               <div className="bubble-label">{name ? `subagent · ${name}` : "subagent"}</div>
-              {event.content && <p>{event.content}</p>}
+              {event.content && <MarkdownLite text={event.content} />}
               {chips.length > 0 && <div className="tool-chips">{chips}</div>}
             </div>
           </div>
@@ -491,7 +803,7 @@ function EventRowView({
       return (
         <div className="msg-row assistant">
           <div className="bubble assistant-bubble">
-            {event.content && <p>{event.content}</p>}
+            {event.content && <MarkdownLite text={event.content} />}
             {chips.length > 0 && <div className="tool-chips">{chips}</div>}
           </div>
         </div>
