@@ -18,3 +18,7 @@ ledger/
 !evidence/
 !evidence/**
 data/
+
+# local agent notes (kept out of the repo)
+/AGENTS.md
+/CLAUDE.md
